@@ -136,14 +136,14 @@ remove_leading_cr(String) ->
     String.
 
 
-serve_file(Path, ContentType) ->
+serve_file(Path, _ContentType) ->
     FileName = filename:join([?DEFAULT_STORE_PATH | Path]),
     case file:read_file(FileName) of
         {ok, FileContents} ->
             ?DEBUG("Delivering content.", []),
             {200,
              [{"Server", "ejabberd"},
-              {"Content-type", ContentType},
+              {"Content-type", "application/octet-stream"},
 	      {"Content-disposition", "attachment; filename="++filename:basename(FileName)}],
              FileContents};
         {error, Error} ->
