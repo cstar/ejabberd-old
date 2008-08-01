@@ -1,0 +1,45 @@
+# $Id$
+
+CC = @CC@
+CFLAGS = @CFLAGS@
+CPPFLAGS = @CPPFLAGS@
+LDFLAGS = @LDFLAGS@
+LIBS = @LIBS@
+
+ERLANG_CFLAGS = @ERLANG_CFLAGS@
+ERLANG_LIBS = @ERLANG_LIBS@
+
+EFLAGS = -I .. -pz ..
+# make debug=true to compile Erlang module with debug informations.
+ifdef debug
+	EFLAGS+=+debug_info
+endif
+
+OUTDIR = ..
+SOURCES = $(wildcard *.erl) ELDAPv3.erl
+BEAMS = $(addprefix $(OUTDIR)/,$(SOURCES:.erl=.beam))
+
+
+all:    $(BEAMS) ELDAPv3.beam
+
+ELDAPv3.beam: ELDAPv3.erl
+
+ELDAPv3.erl:       ELDAPv3.asn
+	@ERLC@ -bber_bin -W $(EFLAGS) $<
+
+$(OUTDIR)/%.beam:	%.erl ELDAPv3.erl
+	@ERLC@ -W $(EFLAGS) -o $(OUTDIR) $<
+
+clean:
+	rm -f ELDAPv3.asn1db
+	rm -f ELDAPv3.erl
+	rm -f ELDAPv3.hrl
+	rm -f ELDAPv3.beam
+	rm -f $(BEAMS)
+
+distclean: clean
+	rm -f Makefile
+
+TAGS:
+	etags *.erl
+
