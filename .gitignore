@@ -1,0 +1,15 @@
+src/*.beam
+src/*.so
+src/*/Makefile
+src/Makefile
+src/XmppAddr.asn1db
+src/XmppAddr.beam
+src/XmppAddr.erl
+src/XmppAddr.hrl
+src/eldap/ELDAPv3.asn1db
+src/eldap/ELDAPv3.beam
+src/eldap/ELDAPv3.erl
+src/eldap/ELDAPv3.hrl
+src/config.log
+src/config.status
+src/ejabberdctl.example

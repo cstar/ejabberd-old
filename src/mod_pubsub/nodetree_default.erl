@@ -38,7 +38,7 @@
 
 -include("pubsub.hrl").
 -include("jlib.hrl").
-
+-include("ejabberd.hrl").
 -behaviour(gen_pubsub_nodetree).
 
 -export([init/3,
@@ -52,9 +52,11 @@
 	 get_subnodes/3,
 	 get_subnodes_tree/3,
 	 create_node/5,
-	 delete_node/2
+	 delete_node/2,
+	 make_key/1
 	]).
 
+-define(PREFIX, "node:").
 
 %% ================
 %% API definition
@@ -69,18 +71,19 @@
 %% <p>This function is mainly used to trigger the setup task necessary for the
 %% plugin. It can be used for example by the developer to create the specific
 %% module database schema if it does not exists yet.</p>
-init(_Host, _ServerHost, _Opts) ->
-    mnesia:create_table(pubsub_node,
-			[{disc_copies, [node()]},
-			 {attributes, record_info(fields, pubsub_node)}]),
-    mnesia:add_table_index(pubsub_node, id),
-    NodesFields = record_info(fields, pubsub_node),
-    case mnesia:table_info(pubsub_node, attributes) of
-	NodesFields -> ok;
-	_ ->
-	    ok
-	    %% mnesia:transform_table(pubsub_state, ignore, StatesFields)
+init(Host, ServerHost, Opts) ->
+    Bucket = gen_mod:get_opt(s3_tree_bucket, Opts, "nodetree."++Host),
+    s3:start(),
+    {ok, Buckets} = s3:list_buckets(),
+    case lists:member(Bucket, Buckets) of 
+        false ->
+            s3:create_bucket(Bucket),
+            ?INFO_MSG("S3 bucket ~s created", [Bucket]);
+        true -> ok
     end,
+    ets:insert(gen_mod:get_module_proc(Host, pubsub_state), {s3_bucket, Bucket}),
+    ets:insert(gen_mod:get_module_proc(ServerHost, pubsub_state), {s3_bucket, Bucket}),
+    s3:start(),
     ok.
 terminate(_Host, _ServerHost) ->
     ok.
@@ -93,65 +96,103 @@ options() ->
 
 %% @spec (NodeRecord) -> ok | {error, Reason}
 %%     Record = mod_pubsub:pubsub_node()
-set_node(Record) when is_record(Record, pubsub_node) ->
-    mnesia:write(Record);
+set_node(#pubsub_node{nodeid = NodeId}=N)->
+    Key = make_key(NodeId),
+    s3:write_term(get_bucket(NodeId), Key, N),
+    ok;
+    
 set_node(_) ->
     {error, ?ERR_INTERNAL_SERVER_ERROR}.
 
+make_key({{_U, _S, _R}=JID, Node})->
+    SNode = mod_pubsub:node_to_string(Node),
+    SHost = jlib:jid_to_string(JID),
+    ?PREFIX++SHost ++ ":" ++ SNode;
+make_key({Host, Node})->
+    SNode = mod_pubsub:node_to_string(Node),
+    ?PREFIX++Host ++ ":" ++ SNode.
+parse_key(?PREFIX++Key) ->
+    [Host| R] = string:tokens(Key, ":"),
+    {Host, mod_pubsub:string_to_node(string:join(R, ":"))}.
+    
+    
+get_bucket({_U, S, _R})->
+    get_bucket(S);
+get_bucket({{_U, S, _R}, _Node})->
+    get_bucket(S);
+get_bucket({Host, _Node})->
+    get_bucket(Host);
+get_bucket(Host) when is_list(Host)->
+    [{s3_bucket, Bucket}] =  ets:lookup(gen_mod:get_module_proc(Host, pubsub_state), s3_bucket),
+    Bucket;
+get_bucket(Host)->
+    ?ERROR_MSG("Unsupported host format : ~p", [Host]).
+get_node(Host, Node, _From) ->
+    get_node(Host, Node).
 %% @spec (Host, Node) -> pubsubNode() | {error, Reason}
 %%     Host = mod_pubsub:host()
 %%     Node = mod_pubsub:pubsubNode()
-get_node(Host, Node, _From) ->
-    get_node(Host, Node).
 get_node(Host, Node) ->
-    case catch mnesia:read({pubsub_node, {Host, Node}}) of
-	[Record] when is_record(Record, pubsub_node) -> Record;
-	[] -> {error, ?ERR_ITEM_NOT_FOUND};
-	Error -> Error
-    end.
+    Key = make_key({Host, Node}),
+    case s3:read_object(get_bucket(Host), Key) of
+        {ok, {Conf, _H}}->
+            binary_to_term(list_to_binary(Conf));
+        _ -> 
+            {error, ?ERR_ITEM_NOT_FOUND}
+    end.  
 
-%% @spec (Host) -> [pubsubNode()] | {error, Reason}
-%%     Host = mod_pubsub:host() | mod_pubsub:jid()
-get_nodes(Host, _From) ->
-    get_nodes(Host).
-get_nodes(Host) ->
-    mnesia:match_object(#pubsub_node{nodeid = {Host, '_'}, _ = '_'}).
+
+get_nodes(Key, _From) ->
+    get_nodes(Key).
+
+%% @spec (Key) -> [pubsubNode()] | {error, Reason}
+%%     Key = mod_pubsub:host() | mod_pubsub:jid()
+get_nodes(Key) ->
+    K=make_key({Key, ""}),
+    Nodes =  s3:get_objects(get_bucket(Key), [{prefix, K}]),
+    lists:map(fun({_K, Bin, _H})-> binary_to_term(list_to_binary(Bin)) end, Nodes).
 
 %% @spec (Host, Node, From) -> [pubsubNode()] | {error, Reason}
 %%     Host = mod_pubsub:host()
 %%     Node = mod_pubsub:pubsubNode()
 %%     From = mod_pubsub:jid()
 get_subnodes(Host, Node, _From) ->
-    get_subnodes(Host, Node).
-get_subnodes(Host, Node) ->
-    mnesia:match_object(#pubsub_node{nodeid = {Host, '_'}, parent = Node, _ = '_'}).
+    Key=make_key({Host, Node}),
+    K = case lists:reverse(Key) of
+        [$/|_R] -> Key;
+        _ -> Key ++ "/"
+    end,
+    Nodes = s3:get_objects(get_bucket(Host), [{prefix, K}, {delimiter, "/"}]),
+    lists:map(fun({_K, Bin, H})-> binary_to_term(list_to_binary(Bin)) end, Nodes).
 
-%% @spec (Host, Index) -> [pubsubNodeIdx()] | {error, Reason}
+%% @spec (Host, Index) -> [pubsubNode()] | {error, Reason}
 %%     Host = mod_pubsub:host()
 %%     Node = mod_pubsub:pubsubNode()
-%%     From = mod_pubsub:jid()
-get_subnodes_tree(Host, Node, _From) ->
+get_subnodes_tree(Host, Node,_From) ->
     get_subnodes_tree(Host, Node).
-get_subnodes_tree(Host, Node) ->
-    mnesia:foldl(fun(#pubsub_node{nodeid = {H, N}} = R, Acc) ->
-			 case lists:prefix(Node, N) and (H == Host) of
-			     true -> [R | Acc];
-			     _ -> Acc
-			 end
-		 end, [], pubsub_node).
 
-%% @spec (Host, Node, Type, Owner, Options) -> ok | {error, Reason}
-%%     Host = mod_pubsub:host() | mod_pubsub:jid()
+get_subnodes_tree(Host, Node)->
+    Key=make_key({Host, Node}),
+    {ok, Items} =  s3:list_objects(get_bucket(Host), [{prefix, Key}]),
+    lists:foldl(fun({object_info,{"Key", K }, _, _,_}, Acc)-> 
+            case parse_key(K) of
+                {_H, Node}->Acc;
+                {_H, N}->[N|Acc]
+            end
+         end, [], Items).
+
+%% @spec (Key, Node, Type, Owner, Options) -> ok | {error, Reason}
+%%     Key = mod_pubsub:host() | mod_pubsub:jid()
 %%     Node = mod_pubsub:pubsubNode()
 %%     NodeType = mod_pubsub:nodeType()
 %%     Owner = mod_pubsub:jid()
 %%     Options = list()
-create_node(Host, Node, Type, Owner, Options) ->
-    BJID = jlib:jid_tolower(jlib:jid_remove_resource(Owner)),
-    case mnesia:read({pubsub_node, {Host, Node}}) of
-	[] ->
+create_node(Key, Node, Type, Owner, Options) ->
+    OwnerKey = jlib:jid_tolower(jlib:jid_remove_resource(Owner)),
+    case get_node(Key, Node) of
+	{error, ?ERR_ITEM_NOT_FOUND} ->
 	    {ParentNode, ParentExists} =
-		case Host of
+		case Key of
 		    {_U, _S, _R} ->
 			%% This is special case for PEP handling
 			%% PEP does not uses hierarchy
@@ -162,38 +203,37 @@ create_node(Host, Node, Type, Owner, Options) ->
 			[] -> 
 			    {[], true};
 			_ ->
-			    case mnesia:read({pubsub_node, {Host, Parent}}) of
-				[] -> {Parent, false};
+			    case get_node(Key, Parent) of
+				{error, ?ERR_ITEM_NOT_FOUND} -> {Parent, false};
 				_ -> {Parent, true}
 			    end
 			end
 		end,
 	    case ParentExists of
 		true ->
-		    NodeId = pubsub_index:new(node),
-		    mnesia:write(#pubsub_node{nodeid = {Host, Node},
-					      id = NodeId,
-					      parent = ParentNode,
+		    %% Service requires registration
+		    %%{error, ?ERR_REGISTRATION_REQUIRED};
+		    set_node(#pubsub_node{nodeid = {Key, Node},
+					      parent = {Key, ParentNode},
 					      type = Type,
-					      owners = [BJID],
-					      options = Options}),
-		    {ok, NodeId};
+					      owners = [OwnerKey],
+					      options = Options});
 		false ->
 		    %% Requesting entity is prohibited from creating nodes
-		    {error, ?ERR_FORBIDDEN}
+		    {error, ?ERR_PAYMENT_REQUIRED}
 	    end;
 	_ ->
 	    %% NodeID already exists
 	    {error, ?ERR_CONFLICT}
     end.
 
-%% @spec (Host, Node) -> [mod_pubsub:node()]
-%%     Host = mod_pubsub:host() | mod_pubsub:jid()
+%% @spec (Key, Node) -> [mod_pubsub:node()]
+%%     Key = mod_pubsub:host() | mod_pubsub:jid()
 %%     Node = mod_pubsub:pubsubNode()
-delete_node(Host, Node) ->
-    Removed = get_subnodes_tree(Host, Node),
-    lists:foreach(fun(#pubsub_node{nodeid = {_, N}, id = I}) ->
-	    pubsub_index:free(node, I),
-	    mnesia:delete({pubsub_node, {Host, N}})
-	end, Removed),
+delete_node(Key, Node) ->
+    Removed = get_subnodes_tree(Key, Node),
+    lists:foreach(fun(N) ->
+            K = make_key({Key, N}),
+		    s3:delete_object(get_bucket(Key), K)
+		  end, Removed),
     Removed.

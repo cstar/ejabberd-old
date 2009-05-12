@@ -206,8 +206,8 @@
 %% If you want to use a different method,
 %% comment this line and enable the correct ones.
 %%
-{auth_method, internal}.
-
+%%{auth_method, internal}.
+{auth_method, sdb}.
 %%
 %% Authentication using external script
 %% Make sure the script is executable by ejabberd.
@@ -461,7 +461,7 @@
   {mod_disco,    []},
   %%{mod_echo,   [{host, "echo.localhost"}]},
   {mod_irc,      []},
-  {mod_last,     []},
+  {mod_last_sdb,     []},
   {mod_muc,      [
 		  %%{host, "conference.@HOST@"},
 		  {access, muc},
@@ -494,7 +494,7 @@
 
 		  {access, register}
 		 ]},
-  {mod_roster,   []},
+  {mod_roster_sdb,   []},
   %%{mod_service_log,[]},
   {mod_shared_roster,[]},
   {mod_stats,    []},

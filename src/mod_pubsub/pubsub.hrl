@@ -82,7 +82,7 @@
 
 %%% @type pubsubNode() = #pubsub_node{
 %%%    nodeid = {Host::host(), Node::pubsubNode()},
-%%%    parentid = {Host::host(), Node::pubsubNode()},
+%%%    parent = {Host::host(), Node::pubsubNode()},
 %%%    nodeidx = int().
 %%%    type = nodeType(),
 %%%    options = [nodeOption()]}
