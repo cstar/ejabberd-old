@@ -3053,6 +3053,7 @@ transaction(Fun, Trans) ->
 	{error, Error} -> {error, Error};
 	{atomic, {result, Result}} -> {result, Result};
 	{atomic, {error, Error}} -> {error, Error};
+	{atomic, ok} -> ok;
 	{aborted, Reason} ->
 	    ?ERROR_MSG("transaction return internal error: ~p~n", [{aborted, Reason}]),
 	    {error, ?ERR_INTERNAL_SERVER_ERROR};

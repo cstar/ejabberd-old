@@ -72,7 +72,7 @@
 %% plugin. It can be used for example by the developer to create the specific
 %% module database schema if it does not exists yet.</p>
 init(Host, ServerHost, Opts) ->
-    Bucket = gen_mod:get_opt(s3_tree_bucket, Opts, "nodetree."++Host),
+    Bucket = gen_mod:get_opt(s3_tree_bucket, Opts, Host),
     s3:start(),
     {ok, Buckets} = s3:list_buckets(),
     case lists:member(Bucket, Buckets) of 
@@ -136,7 +136,9 @@ get_node(Host, Node) ->
     Key = make_key({Host, Node}),
     case s3:read_object(get_bucket(Host), Key) of
         {ok, {Conf, _H}}->
-            binary_to_term(list_to_binary(Conf));
+            R = binary_to_term(list_to_binary(Conf)),
+            ?DEBUG("Got node : ~p", [R]),
+            R;
         _ -> 
             {error, ?ERR_ITEM_NOT_FOUND}
     end.  
@@ -213,11 +215,14 @@ create_node(Key, Node, Type, Owner, Options) ->
 		true ->
 		    %% Service requires registration
 		    %%{error, ?ERR_REGISTRATION_REQUIRED};
+		    %NodeId = pubsub_index:new(node),
 		    set_node(#pubsub_node{nodeid = {Key, Node},
 					      parent = {Key, ParentNode},
+					      id = {Key, Node},
 					      type = Type,
 					      owners = [OwnerKey],
-					      options = Options});
+					      options = Options}),
+			{ok, {Key, Node}};
 		false ->
 		    %% Requesting entity is prohibited from creating nodes
 		    {error, ?ERR_PAYMENT_REQUIRED}
