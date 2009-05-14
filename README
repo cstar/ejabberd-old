@@ -1,6 +1,9 @@
 ejabberd - High-Performance Enterprise Instant Messaging Server 
 
-Cloud Edition
+--- Note/caveat from cstar ----
+Cloud Edition -- That's just to look pompous and cool.
+Though it is a fork in the github sense, it is *proof of concept*.
+It has not seen production yet so use at your own risk
 
 Quickstart guide
 
