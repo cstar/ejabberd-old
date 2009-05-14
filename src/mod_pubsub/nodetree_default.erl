@@ -72,7 +72,7 @@
 %% plugin. It can be used for example by the developer to create the specific
 %% module database schema if it does not exists yet.</p>
 init(Host, ServerHost, Opts) ->
-    Bucket = gen_mod:get_opt(s3_tree_bucket, Opts, Host),
+    Bucket = gen_mod:get_opt(s3_bucket, Opts, ServerHost),
     s3:start(),
     {ok, Buckets} = s3:list_buckets(),
     case lists:member(Bucket, Buckets) of 
@@ -165,7 +165,7 @@ get_subnodes(Host, Node, _From) ->
         _ -> Key ++ "/"
     end,
     Nodes = s3:get_objects(get_bucket(Host), [{prefix, K}, {delimiter, "/"}]),
-    lists:map(fun({_K, Bin, H})-> binary_to_term(list_to_binary(Bin)) end, Nodes).
+    lists:map(fun({_K, Bin, _H})-> binary_to_term(list_to_binary(Bin)) end, Nodes).
 
 %% @spec (Host, Index) -> [pubsubNode()] | {error, Reason}
 %%     Host = mod_pubsub:host()

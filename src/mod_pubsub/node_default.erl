@@ -94,7 +94,7 @@
 %% module database schema if it does not exists yet.</p>
 init(Host, ServerHost, Opts) ->
     erlsdb:start(),
-    Bucket = gen_mod:get_opt(s3_tree_bucket, Opts, Host),
+    Bucket = gen_mod:get_opt(s3_tree_bucket, Opts, ServerHost),
     s3:start(),
     {ok, Buckets} = s3:list_buckets(),
     case lists:member(Bucket, Buckets) of 
@@ -680,7 +680,7 @@ get_states({Host, Node}) ->
 %%	 State = mod_pubsub:pubsubItems()
 %% @doc <p>Returns a state (one state list), given its reference.</p>
 get_state({Host, Node}, JID) ->
-    {SJID, SHost, SNode, Key} = make_key({JID, {Host, Node}}),
+    {_SJID, _SHost, _SNode, Key} = make_key({JID, {Host, Node}}),
     {ok, Attrs} = erlsdb:get_attributes(?DOMAIN, Key), 
     S = sdb_to_record(Attrs),
     State = S#pubsub_state{stateid = {JID, {Host, Node}}},
@@ -705,7 +705,7 @@ set_state(#pubsub_state{stateid = StateId,
                                       {"jid", SJID},
                                       {"affiliation", a2l(Aff)},
                                       {"subscription", a2l(Subs)}]]),
-    R = erlsdb:replace_attributes(?DOMAIN, Key, [{"host", SHost}, 
+    erlsdb:replace_attributes(?DOMAIN, Key, [{"host", SHost}, 
                                          {"node", SNode},
                                          {"jid", SJID},
                                          {"affiliation", a2l(Aff)},
@@ -720,7 +720,7 @@ set_state(_) ->
 %%   JID = mod_pubsub:Jid()
 %% @doc <p>Delete a state from database.</p>
 del_state(NodeId, JID) ->
-    {SJID, SHost, SNode, Key} = make_key({JID, NodeId}),
+    {_SJID, _SHost, _SNode, Key} = make_key({JID, NodeId}),
     erlsdb:delete_item(?DOMAIN,Key),
     ok.
 
