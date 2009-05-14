@@ -23,7 +23,7 @@
 %%% 02111-1307 USA
 %%%
 %%%----------------------------------------------------------------------
-
+%%@hidden
 -module(mod_muc).
 -author('alexey@process-one.net').
 
@@ -35,11 +35,12 @@
 	 start/2,
 	 stop/1,
 	 room_destroyed/4,
-	 store_room/3,
-	 restore_room/2,
-	 forget_room/2,
+	 store_room/5,
+	 restore_room/3,
+	 forget_room/3,
 	 create_room/5,
-	 process_iq_disco_items/4,
+	 create_room/6,
+	 process_iq_disco_items/6,
 	 can_use_nick/3]).
 
 %% gen_server callbacks
@@ -48,9 +49,8 @@
 
 -include("ejabberd.hrl").
 -include("jlib.hrl").
+-include("mod_muc.hrl").
 
-
--record(muc_room, {name_host, opts}).
 -record(muc_online_room, {name_host, pid}).
 -record(muc_registered, {us_host, nick}).
 
@@ -59,6 +59,9 @@
 		access,
 		history_size,
 		default_room_opts,
+		storage=muc_storage_default,
+		handlers=[muc_room_default],
+		default_handler=muc_room_default,
 		room_shaper}).
 
 -define(PROCNAME, ejabberd_mod_muc).
@@ -106,37 +109,36 @@ room_destroyed(Host, Room, Pid, ServerHost) ->
 %% @doc Create a room.
 %% If Opts = default, the default room options are used.
 %% Else use the passed options as defined in mod_muc_room.
+create_room(Host, Name, From, Nick, Opts, Handler) ->
+    Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
+    gen_server:call(Proc, {create, Name, From, Nick, Opts, Handler}).
+     
 create_room(Host, Name, From, Nick, Opts) ->
     Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
     gen_server:call(Proc, {create, Name, From, Nick, Opts}).
 
-store_room(Host, Name, Opts) ->
-    F = fun() ->
-		mnesia:write(#muc_room{name_host = {Name, Host},
-				       opts = Opts})
-	end,
-    mnesia:transaction(F).
+get_storage(ServerHost) ->
+    Proc = gen_mod:get_module_proc(ServerHost, ?PROCNAME),
+    gen_server:call(Proc, get_storage).
+    
+store_room(ServerHost,Host, Type, Name, Opts) ->
+    H = get_storage(ServerHost),
+    H:store_room(Host,ServerHost, Type, Name, Opts).
 
-restore_room(Host, Name) ->
-    case catch mnesia:dirty_read(muc_room, {Name, Host}) of
-	[#muc_room{opts = Opts}] ->
-	    Opts;
-	_ ->
-	    error
-    end.
+restore_room(ServerHost,Host, Name) ->
+    H = get_storage(ServerHost),
+    H:restore_room(Host,ServerHost, Name).
 
-forget_room(Host, Name) ->
-    F = fun() ->
-		mnesia:delete({muc_room, {Name, Host}})
-	end,
-    mnesia:transaction(F).
+forget_room(ServerHost,Host, Name) ->
+    H = get_storage(ServerHost),
+    H:forget_room(Host,ServerHost, Name).
 
-process_iq_disco_items(Host, From, To, #iq{lang = Lang} = IQ) ->
+process_iq_disco_items(Host, ServerHost, From, To, #iq{lang = Lang} = IQ, Storage) ->
     Rsm = jlib:rsm_decode(IQ),
     Res = IQ#iq{type = result,
 		sub_el = [{xmlelement, "query",
 			   [{"xmlns", ?NS_DISCO_ITEMS}],
-			   iq_disco_items(Host, From, Lang, Rsm)}]},
+			   iq_disco_items(Host, ServerHost, From, Lang, Rsm, Storage)}]},
     ejabberd_router:route(To,
 			  From,
 			  jlib:iq_to_xml(Res)).
@@ -173,12 +175,12 @@ can_use_nick(Host, JID, Nick) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([Host, Opts]) ->
-    mnesia:create_table(muc_room,
-			[{disc_copies, [node()]},
-			 {attributes, record_info(fields, muc_room)}]),
-    mnesia:create_table(muc_registered,
-			[{disc_copies, [node()]},
-			 {attributes, record_info(fields, muc_registered)}]),
+	Storage = gen_mod:get_opt(storage, Opts, muc_storage_default),
+	DefaultHandler = gen_mod:get_opt(default_handler, Opts, muc_room_default),
+	Handlers = gen_mod:get_opt(handlers, Opts, [muc_room_default]),
+	mnesia:create_table(muc_registered,
+		[{disc_copies, [node()]},
+		 {attributes, record_info(fields, muc_registered)}]),
     mnesia:create_table(muc_online_room,
 			[{ram_copies, [node()]},
 			 {attributes, record_info(fields, muc_online_room)}]),
@@ -197,16 +199,23 @@ init([Host, Opts]) ->
     DefRoomOpts = gen_mod:get_opt(default_room_options, Opts, []),
     RoomShaper = gen_mod:get_opt(room_shaper, Opts, none),
     ejabberd_router:register_route(MyHost),
-    load_permanent_rooms(MyHost, Host,
-			 {Access, AccessCreate, AccessAdmin, AccessPersistent},
-			 HistorySize,
-			 RoomShaper),
-    {ok, #state{host = MyHost,
-		server_host = Host,
-		access = {Access, AccessCreate, AccessAdmin, AccessPersistent},
-		default_room_opts = DefRoomOpts,
-		history_size = HistorySize,
-		room_shaper = RoomShaper}}.
+    case Storage:init(Host, MyHost, Opts) of
+        ok -> 
+            %load_permanent_rooms(MyHost, Host,
+	        %		 {Access, AccessCreate, AccessAdmin, AccessPersistent},
+	        %		 HistorySize,
+	        %		 RoomShaper, Storage),
+            {ok, #state{host = MyHost,
+	        	server_host = Host,
+	        	access = {Access, AccessCreate, AccessAdmin, AccessPersistent},
+	        	default_room_opts = DefRoomOpts,
+	        	default_handler = DefaultHandler,
+	        	handlers = Handlers,
+	        	storage=Storage,
+	        	history_size = HistorySize,
+	        	room_shaper = RoomShaper}};
+	    {error, Reason} -> {stop, Reason}
+	end.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -220,14 +229,22 @@ init([Host, Opts]) ->
 handle_call(stop, _From, State) ->
     {stop, normal, ok, State};
 
-handle_call({create, Room, From, Nick, Opts},
+handle_call(get_storage,_From,#state{storage=Handler}=State )->
+    {reply, Handler, State};
+
+handle_call({create, Room, From, Nick, Opts}, FromPid, 
+        #state{ default_handler = Handler } = State) ->
+	handle_call({create, Room, From, Nick, Opts, Handler}, FromPid, State);
+
+handle_call({create, Room, From, Nick, Opts, Handler},
 	    _From,
 	    #state{host = Host,
 		   server_host = ServerHost,
 		   access = Access,
 		   default_room_opts = DefOpts,
 		   history_size = HistorySize,
-		   room_shaper = RoomShaper} = State) ->
+		   room_shaper = RoomShaper,
+		   storage = Storage } = State) ->
     ?DEBUG("MUC: create new room '~s'~n", [Room]),
     NewOpts = case Opts of
 		  default -> DefOpts;
@@ -237,7 +254,7 @@ handle_call({create, Room, From, Nick, Opts},
 		  Host, ServerHost, Access,
 		  Room, HistorySize,
 		  RoomShaper, From,
-		  Nick, NewOpts),
+		  Nick, NewOpts, Handler, Storage ),
     register_room(Host, Room, Pid),
     {reply, ok, State}.
 
@@ -247,6 +264,7 @@ handle_call({create, Room, From, Nick, Opts},
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
+
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -262,9 +280,11 @@ handle_info({route, From, To, Packet},
 		   access = Access,
  		   default_room_opts = DefRoomOpts,
 		   history_size = HistorySize,
-		   room_shaper = RoomShaper} = State) ->
+		   room_shaper = RoomShaper,
+		   default_handler = Handler,
+		   storage = Storage } = State) ->
     case catch do_route(Host, ServerHost, Access, HistorySize, RoomShaper,
-			From, To, Packet, DefRoomOpts) of
+			From, To, Packet, DefRoomOpts, Handler, Storage) of
 	{'EXIT', Reason} ->
 	    ?ERROR_MSG("~p", [Reason]);
 	_ ->
@@ -323,12 +343,12 @@ stop_supervisor(Host) ->
     supervisor:delete_child(ejabberd_sup, Proc).
 
 do_route(Host, ServerHost, Access, HistorySize, RoomShaper,
-	 From, To, Packet, DefRoomOpts) ->
+	 From, To, Packet, DefRoomOpts, Handler, Storage) ->
     {AccessRoute, _AccessCreate, _AccessAdmin, _AccessPersistent} = Access,
     case acl:match_rule(ServerHost, AccessRoute, From) of
 	allow ->
 	    do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
-		      From, To, Packet, DefRoomOpts);
+		      From, To, Packet, DefRoomOpts, Handler, Storage);
 	_ ->
 	    {xmlelement, _Name, Attrs, _Els} = Packet,
 	    Lang = xml:get_attr_s("xml:lang", Attrs),
@@ -340,7 +360,7 @@ do_route(Host, ServerHost, Access, HistorySize, RoomShaper,
 
 
 do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
-	  From, To, Packet, DefRoomOpts) ->
+	  From, To, Packet, DefRoomOpts, Handler, Storage) ->
     {_AccessRoute, AccessCreate, AccessAdmin, _AccessPersistent} = Access,
     {Room, _, Nick} = jlib:jid_tolower(To),
     {xmlelement, Name, Attrs, _Els} = Packet,
@@ -364,7 +384,7 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 				    xmlns = ?NS_DISCO_ITEMS} = IQ ->
 				    spawn(?MODULE,
 					  process_iq_disco_items,
-					  [Host, From, To, IQ]);
+					  [Host, ServerHost, From, To, IQ, Storage]);
 				#iq{type = get,
 				    xmlns = ?NS_REGISTER = XMLNS,
 				    lang = Lang,
@@ -456,29 +476,45 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 	    end;
 	_ ->
 	    case mnesia:dirty_read(muc_online_room, {Room, Host}) of
-		[] ->
+		[] ->		    
 		    Type = xml:get_attr_s("type", Attrs),
 		    case {Name, Type} of
 			{"presence", ""} ->
-			    case check_user_can_create_room(ServerHost,
-							    AccessCreate, From,
-							    Room) of
-				true ->
-				    ?DEBUG("MUC: open new room '~s'~n", [Room]),
-				    {ok, Pid} = mod_muc_room:start(
-						  Host, ServerHost, Access,
-						  Room, HistorySize,
-						  RoomShaper, From,
-						  Nick, DefRoomOpts),
-				    register_room(Host, Room, Pid),
-				    mod_muc_room:route(Pid, From, Nick, Packet),
-				    ok;
-				false ->
-				    Lang = xml:get_attr_s("xml:lang", Attrs),
-				    ErrText = "Room creation is denied by service policy",
-				    Err = jlib:make_error_reply(
-					    Packet, ?ERRT_FORBIDDEN(Lang, ErrText)),
-				    ejabberd_router:route(To, From, Err)
+			    case Storage:restore_room(Host, ServerHost, Room) of
+		        {Handler, Opts} ->
+		            ?DEBUG("MUC: Restoring room '~s'~n", [Room]),
+		            {ok, Pid} = mod_muc_room:start(
+				        Host,
+				        ServerHost,
+				        Access,
+				        Room,
+				        HistorySize,
+				        RoomShaper,
+				        Opts,
+				        Handler,
+				        Storage),
+		            register_room(Host, Room, Pid),
+		            mod_muc_room:route(Pid, From, Nick, Packet),
+		            ok;
+		        error ->
+			        case acl:match_rule(ServerHost, AccessCreate, From) of
+				    allow ->
+				        ?DEBUG("MUC: open new room '~s'~n", [Room]),
+				        {ok, Pid} = mod_muc_room:start(
+				    		  Host, ServerHost, Access,
+				    		  Room, HistorySize,
+				    		  RoomShaper, From,
+				    		  Nick, DefRoomOpts, Handler, Storage),
+				        register_room(Host, Room, Pid),
+				        mod_muc_room:route(Pid, From, Nick, Packet),
+				        ok;
+				    _ ->
+				        Lang = xml:get_attr_s("xml:lang", Attrs),
+				        ErrText = "Room creation is denied by service policy",
+				        Err = jlib:make_error_reply(
+				    	    Packet, ?ERRT_FORBIDDEN(Lang, ErrText)),
+				        ejabberd_router:route(To, From, Err)
+			        end
 			    end;
 			_ ->
 			    Lang = xml:get_attr_s("xml:lang", Attrs),
@@ -495,44 +531,29 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 	    end
     end.
 
-check_user_can_create_room(ServerHost, AccessCreate, From, RoomID) ->
-    case acl:match_rule(ServerHost, AccessCreate, From) of
-	allow ->
-	    (length(RoomID) =< gen_mod:get_module_opt(ServerHost, mod_muc,
-						      max_room_id, infinite));
-	_ ->
-	    false
-    end.
 
 
-load_permanent_rooms(Host, ServerHost, Access, HistorySize, RoomShaper) ->
-    case catch mnesia:dirty_select(
-		 muc_room, [{#muc_room{name_host = {'_', Host}, _ = '_'},
-			     [],
-			     ['$_']}]) of
-	{'EXIT', Reason} ->
-	    ?ERROR_MSG("~p", [Reason]),
-	    ok;
-	Rs ->
-	    lists:foreach(
-	      fun(R) ->
-		      {Room, Host} = R#muc_room.name_host,
-		      case mnesia:dirty_read(muc_online_room, {Room, Host}) of
-			  [] ->
-			      {ok, Pid} = mod_muc_room:start(
-					    Host,
-					    ServerHost,
-					    Access,
-					    Room,
-					    HistorySize,
-					    RoomShaper,
-					    R#muc_room.opts),
-			      register_room(Host, Room, Pid);
-			  _ ->
-			      ok
-		      end
-	      end, Rs)
-    end.
+
+load_permanent_rooms(Host, ServerHost, Access, HistorySize, RoomShaper, Storage) ->
+	lists:foreach(
+	  fun(#muc_room{type=Handler, name_host={Room, _Host}, opts=Opts}) ->
+	      case mnesia:dirty_read(muc_online_room, {Room, Host}) of
+		  [] ->
+		      {ok, Pid} = mod_muc_room:start(
+				    Host,
+				    ServerHost,
+				    Access,
+				    Room,
+				    HistorySize,
+				    RoomShaper,
+				    Opts,
+				    Handler,
+				    Storage),
+		      register_room(Host, Room, Pid);
+		  _ ->
+		      ok
+		  end
+	  end, Storage:fetch_all_rooms(ServerHost, Host)).
 
 register_room(Host, Room, Pid) ->
     F = fun() ->
@@ -555,11 +576,14 @@ iq_disco_info(Lang) ->
      {xmlelement, "feature", [{"var", ?NS_VCARD}], []}].
 
 
-iq_disco_items(Host, From, Lang, none) ->
-    lists:zf(fun(#muc_online_room{name_host = {Name, _Host}, pid = Pid}) ->
+iq_disco_items(Host, ServerHost, From, Lang, none, Storage) ->
+    OnlineRooms = get_vh_rooms(Host),
+    PersistentRooms = Storage:fetch_room_names(Host, ServerHost),
+    lists:zf(
+        fun(#muc_online_room{name_host = {Name, _Host}, pid = Pid}) ->
 		     case catch gen_fsm:sync_send_all_state_event(
 				  Pid, {get_disco_item, From, Lang}, 100) of
-			 {item, Desc} ->
+			 {ok, {item, Desc}} ->
 			     flush(),
 			     {true,
 			      {xmlelement, "item",
@@ -567,10 +591,15 @@ iq_disco_items(Host, From, Lang, none) ->
 				{"name", Desc}], []}};
 			 _ ->
 			     false
-		     end
-	     end, get_vh_rooms(Host));
+		     end;
+		    ({Name, _Host})->
+		        {true,
+			      {xmlelement, "item",
+			       [{"jid", jlib:jid_to_string({Name, Host, ""})},
+				{"name", Name ++ "(0)"}], []}}
+	     end, OnlineRooms ++ PersistentRooms);
 
-iq_disco_items(Host, From, Lang, Rsm) ->
+iq_disco_items(Host,_ServerHost, From, Lang, Rsm, _Storage) ->
     {Rooms, RsmO} = get_vh_rooms(Host, Rsm),
     RsmOut = jlib:rsm_encode(RsmO),
     lists:zf(fun(#muc_online_room{name_host = {Name, _Host}, pid = Pid}) ->
@@ -587,6 +616,12 @@ iq_disco_items(Host, From, Lang, Rsm) ->
 		     end
 	     end, Rooms) ++ RsmOut.
 
+get_vh_rooms(Host) ->
+     mnesia:dirty_select(muc_online_room,
+			[{#muc_online_room{name_host = '$1', _ = '_'},
+			  [{'==', {element, 2, '$1'}, Host}],
+			  ['$_']}]).
+			  
 get_vh_rooms(Host, #rsm_in{max=M, direction=Direction, id=I, index=Index})->
     AllRooms = lists:sort(get_vh_rooms(Host)),
     Count = erlang:length(AllRooms),
@@ -715,7 +750,7 @@ iq_set_register_info(Host, From, Nick, Lang) ->
 	{atomic, ok} ->
 	    {result, []};
 	{atomic, false} ->
-	    ErrText = "That nickname is registered by another person",
+	    ErrText = "Specified nickname is already registered",
 	    {error, ?ERRT_CONFLICT(Lang, ErrText)};
 	_ ->
 	    {error, ?ERR_INTERNAL_SERVER_ERROR}
@@ -772,12 +807,6 @@ broadcast_service_message(Host, Msg) ->
 		Pid, {service_message, Msg})
       end, get_vh_rooms(Host)).
 
-get_vh_rooms(Host) ->
-    mnesia:dirty_select(muc_online_room,
-			[{#muc_online_room{name_host = '$1', _ = '_'},
-			  [{'==', {element, 2, '$1'}, Host}],
-			  ['$_']}]).
-
 
 clean_table_from_bad_node(Node) ->
     F = fun() ->
@@ -809,49 +838,9 @@ clean_table_from_bad_node(Node, Host) ->
 
 
 update_tables(Host) ->
-    update_muc_room_table(Host),
     update_muc_registered_table(Host).
 
-update_muc_room_table(Host) ->
-    Fields = record_info(fields, muc_room),
-    case mnesia:table_info(muc_room, attributes) of
-	Fields ->
-	    ok;
-	[name, opts] ->
-	    ?INFO_MSG("Converting muc_room table from "
-		      "{name, opts} format", []),
-	    {atomic, ok} = mnesia:create_table(
-			     mod_muc_tmp_table,
-			     [{disc_only_copies, [node()]},
-			      {type, bag},
-			      {local_content, true},
-			      {record_name, muc_room},
-			      {attributes, record_info(fields, muc_room)}]),
-	    mnesia:transform_table(muc_room, ignore, Fields),
-	    F1 = fun() ->
-			 mnesia:write_lock_table(mod_muc_tmp_table),
-			 mnesia:foldl(
-			   fun(#muc_room{name_host = Name} = R, _) ->
-				   mnesia:dirty_write(
-				     mod_muc_tmp_table,
-				     R#muc_room{name_host = {Name, Host}})
-			   end, ok, muc_room)
-		 end,
-	    mnesia:transaction(F1),
-	    mnesia:clear_table(muc_room),
-	    F2 = fun() ->
-			 mnesia:write_lock_table(muc_room),
-			 mnesia:foldl(
-			   fun(R, _) ->
-				   mnesia:dirty_write(R)
-			   end, ok, mod_muc_tmp_table)
-		 end,
-	    mnesia:transaction(F2),
-	    mnesia:delete_table(mod_muc_tmp_table);
-	_ ->
-	    ?INFO_MSG("Recreating muc_room table", []),
-	    mnesia:transform_table(muc_room, ignore, Fields)
-    end.
+
 
 
 update_muc_registered_table(Host) ->
