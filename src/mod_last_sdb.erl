@@ -188,9 +188,4 @@ remove_user(User, Server) ->
    JID = LUser ++ "@" ++LServer,
    catch erlsdb:delete_attributes(?DOMAIN, JID, ["timestamp", "status"]).
 
-sleep(T) ->
-    receive
-    after T ->
-       true
-    end.
 
