@@ -1,5 +1,7 @@
 ejabberd - High-Performance Enterprise Instant Messaging Server 
 
+Cloud Edition
+
 Quickstart guide
 
 
@@ -20,7 +22,7 @@ To compile ejabberd you need:
  - PAM library. Optional. For Pluggable Authentication Modules (PAM).
  - GNU Iconv 1.8 or higher, for the IRC Transport
    (mod_irc). Optional. Not needed on systems with GNU Libc.
-
+ - erls3 (https://github.com/cstar/erls3/tree) and erlsdb (https://github.com/cstar/erlsdb/tree)
 
 1. Compile and install on *nix systems
 
@@ -41,8 +43,15 @@ These commands will:
  - Create a spool directory: /var/lib/ejabberd/
  - Create a directory for log files: /var/log/ejabberd/
 
+2. Configure ejabberd
 
-2. Start ejabberd
+Edit ejabberd.cfg
+Set the environment variables AMAZON_ACCESS_KEY_ID and AMAZON_SECRET_ACCESS_KEY to your AWS account values.
+Set EJABBERD_SALT to a sufficiently long string for password encryption.
+
+Please note that passwords are exchanged in clear, so you want to enable C2S TLS encryption.
+
+3. Start ejabberd
 
 You can use the ejabberdctl command line administration script to
 start and stop ejabberd. For example:

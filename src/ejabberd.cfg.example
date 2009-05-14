@@ -464,6 +464,7 @@
   {mod_last_sdb,     []},
   {mod_muc,      [
 		  %%{host, "conference.@HOST@"},
+		  {storage, s3_muc_storage},{s3_bucket, "muc.localhost"},
 		  {access, muc},
 		  {access_create, muc},
 		  {access_persistent, muc},

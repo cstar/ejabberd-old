@@ -13,3 +13,13 @@ src/eldap/ELDAPv3.hrl
 src/config.log
 src/config.status
 src/ejabberdctl.example
+src/ejabberd_zlib_drv.so.dSYM/Contents/Info.plist
+src/ejabberd_zlib_drv.so.dSYM/Contents/Resources/DWARF/ejabberd_zlib_drv.so
+src/expat_erl.so.dSYM/Contents/Info.plist
+src/expat_erl.so.dSYM/Contents/Resources/DWARF/expat_erl.so
+src/iconv_erl.so.dSYM/Contents/Info.plist
+src/iconv_erl.so.dSYM/Contents/Resources/DWARF/iconv_erl.so
+src/stringprep_drv.so.dSYM/Contents/Info.plist
+src/stringprep_drv.so.dSYM/Contents/Resources/DWARF/stringprep_drv.so
+src/tls_drv.so.dSYM/Contents/Info.plist
+src/tls_drv.so.dSYM/Contents/Resources/DWARF/tls_drv.so
