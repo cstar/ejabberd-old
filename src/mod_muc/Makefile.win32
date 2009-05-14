@@ -19,3 +19,21 @@ $(OUTDIR)\mod_muc_log.beam : mod_muc_log.erl
 
 $(OUTDIR)\mod_muc_room.beam : mod_muc_room.erl
 	erlc -W $(EFLAGS) -o $(OUTDIR) mod_muc_room.erl
+
+(OUTDIR)\muc_room_default.beam : muc_room_default.erl
+	erlc -W (EFLAGS) -o (OUTDIR) muc_room_default.erl
+
+(OUTDIR)\minimal_muc.beam : minimal_muc.erl
+	erlc -W (EFLAGS) -o (OUTDIR) minimal_muc.erl
+
+(OUTDIR)\muc_storage_default.beam : muc_storage_default.erl
+	erlc -W (EFLAGS) -o (OUTDIR) muc_storage_default.erl
+
+(OUTDIR)\muc_storage_default.beam : muc_storage_default.erl
+	erlc -W (EFLAGS) -o (OUTDIR) muc_storage_default.erl
+
+(OUTDIR)\gen_muc_handler.beam : gen_muc_handler.erl
+	erlc -W (EFLAGS) -o (OUTDIR) gen_muc_handler.erl
+
+(OUTDIR)\gen_muc_storage.beam : gen_muc_storage.erl
+	erlc -W (EFLAGS) -o (OUTDIR) gen_muc_storage.erl
