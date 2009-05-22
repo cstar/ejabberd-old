@@ -40,6 +40,7 @@
 	 forget_room/3,
 	 create_room/5,
 	 create_room/6,
+	 start_room/2,
 	 process_iq_disco_items/6,
 	 can_use_nick/3]).
 
@@ -116,6 +117,10 @@ create_room(Host, Name, From, Nick, Opts, Handler) ->
 create_room(Host, Name, From, Nick, Opts) ->
     Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
     gen_server:call(Proc, {create, Name, From, Nick, Opts}).
+
+start_room(Host, Name)->
+    Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
+    gen_server:call(Proc, {start, Name}, 6000).
 
 get_storage(ServerHost) ->
     Proc = gen_mod:get_module_proc(ServerHost, ?PROCNAME),
@@ -231,7 +236,37 @@ handle_call(stop, _From, State) ->
 
 handle_call(get_storage,_From,#state{storage=Handler}=State )->
     {reply, Handler, State};
-
+    
+    
+handle_call({start,Room},_From,#state{host = Host,
+		   server_host = ServerHost,
+		   access = Access,
+		   default_room_opts = DefOpts,
+		   history_size = HistorySize,
+		   room_shaper = RoomShaper,
+		   storage = Storage } = State)->
+	case Storage:restore_room(Host, ServerHost, Room) of
+		 {Handler, Opts} ->
+		     ?DEBUG("MUC: Restoring room '~s'~n", [Room]),
+		     R = case mod_muc_room:start(
+		         Host,
+		         ServerHost,
+		         Access,
+		         Room,
+		         HistorySize,
+		         RoomShaper,
+		         Opts,
+		         Handler,
+		         Storage) of
+		        {ok, Pid }->
+		            register_room(Host, Room, Pid),
+		            {ok, Pid};
+		        Error -> Error
+		    end,
+             {reply, R, State};
+        Error -> {reply, Error, State}
+    end;
+        
 handle_call({create, Room, From, Nick, Opts}, FromPid, 
         #state{ default_handler = Handler } = State) ->
 	handle_call({create, Room, From, Nick, Opts, Handler}, FromPid, State);
@@ -533,27 +568,6 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 
 
 
-
-load_permanent_rooms(Host, ServerHost, Access, HistorySize, RoomShaper, Storage) ->
-	lists:foreach(
-	  fun(#muc_room{type=Handler, name_host={Room, _Host}, opts=Opts}) ->
-	      case mnesia:dirty_read(muc_online_room, {Room, Host}) of
-		  [] ->
-		      {ok, Pid} = mod_muc_room:start(
-				    Host,
-				    ServerHost,
-				    Access,
-				    Room,
-				    HistorySize,
-				    RoomShaper,
-				    Opts,
-				    Handler,
-				    Storage),
-		      register_room(Host, Room, Pid);
-		  _ ->
-		      ok
-		  end
-	  end, Storage:fetch_all_rooms(ServerHost, Host)).
 
 register_room(Host, Room, Pid) ->
     F = fun() ->
