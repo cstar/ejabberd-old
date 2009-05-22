@@ -84,28 +84,6 @@
 
 -record(lqueue, {queue, len, max}).
 
--record(config, {title = "",
-		 description = "",
-		 allow_change_subj = true,
-		 allow_query_users = true,
-		 allow_private_messages = true,
-		 allow_visitor_status = true,
-		 allow_visitor_nickchange = true,
-		 persistent = false,
-		 max_users = ?MAX_USERS_DEFAULT,
-		 public = true,
-		 public_list = true,
-		 moderated = true,
-		 captcha_protected = false,
-		 members_by_default = true,
-		 members_only = false,
-		 allow_user_invites = false,
-		 password_protected = false,
-		 password = "",
-		 anonymous = true,
-		 logging = false,
-		 custom = []
-		}).
 		
 
 %% @type user() = #user{

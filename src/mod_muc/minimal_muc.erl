@@ -43,7 +43,7 @@ init(DefRoomOpts,Creator, Nick,Headers)->{result, ok, Headers}.
 %% @doc Called upon room reloading (if room is persistent)
 %% @spec (Opts,Headers)->
 %%        {result, ok, Headers} | {error, Why, Headers}
-%%  DefRoomOpts = [{atom(), any()}]
+%%  Opts = [{atom(), any()}]
 %%  Headers = headers()
 %%  
 init(Opts,Headers)->{result, ok, Headers}.

@@ -6,7 +6,28 @@
 -include("ejabberd.hrl").
 -include("jlib.hrl").
 -include("mod_muc_room.hrl"). 
-
+-record(config, {title = "",
+		 description = "",
+		 allow_change_subj = true,
+		 allow_query_users = true,
+		 allow_private_messages = true,
+		 allow_visitor_status = true,
+		 allow_visitor_nickchange = true,
+		 persistent = false,
+		 max_users = ?MAX_USERS_DEFAULT,
+		 public = true,
+		 public_list = true,
+		 moderated = true,
+		 captcha_protected = false,
+		 members_by_default = true,
+		 members_only = false,
+		 allow_user_invites = false,
+		 password_protected = false,
+		 password = "",
+		 anonymous = true,
+		 logging = false,
+		 custom = []
+		}).
 -export([process_groupchat_message/5,
          process_private_message/4,
          process_iq/7,
