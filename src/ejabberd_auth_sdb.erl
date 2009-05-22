@@ -71,7 +71,8 @@ check_password(User, Server, Password) ->
     Salt = os:getenv("EJABBERD_SALT"),
     case catch erlsdb:get_attributes(?DOMAIN, LUser ++"@" ++LServer, ["password"]) of
         {ok, [{"password", Hash}]} -> 
-            Hash == sha2:hexdigest256(Password ++ Salt);
+            Computed = sha2:hexdigest256(Password ++ Salt),
+            Hash == Computed;
         _ -> false
     end.
 
@@ -132,7 +133,7 @@ try_register(User, Server, Password) ->
 	    case catch erlsdb:get_attributes(?DOMAIN, LUser) of
             {ok, []} -> 
                 Salt = os:getenv("EJABBERD_SALT"),
-                erlsdb:put_attributes(?DOMAIN, LUser ++"@" ++LServer, [{"password", sha2:hexdigest256(Password ++ Salt)}, {"user", LUser}, {"host", LServer}]),
+                erlsdb:put_attributes(?DOMAIN, LUser ++"@" ++LServer, [{"password", sha2:hexdigest256(Password ++ Salt)}, {"name", LUser}, {"host", LServer}]),
                 {atomic, ok} ;
 	        {ok, _U} ->
 	            {atomic, exists};
