@@ -559,11 +559,16 @@ get_entity_affiliations(Host, Owner) ->
     SGenKey = jlib:jid_to_string(GenKey),
     SHost = host_to_string(Host),
     {ok, Items}=erlsdb:s_all("select * from pubsub where and host='"++SHost ++"' and jid='" ++ SGenKey ++ "'"),
-    Affs = lists:map(fun(S)->
+    Affs = lists:foldl(fun(S,Acc)->
         #pubsub_state{stateid = {_, {_, N}}, affiliation = A} = sdb_to_record(S),
-        {N, A}
-    end,  Items),
+        #pubsub_node{nodeid = {H, _}} = Node = nodetree_default:get_node(Host, N), %%ECE Can't do any better. Need to change mod_pubsub otherwise.
+        case H of
+		    Host -> [{Node, A}|Acc];
+		    _ -> Acc
+		end
+    end, [],  Items),
     {result, Affs}.
+
 
 get_node_affiliations(NodeId) ->
     {result, States} = get_states(NodeId),
@@ -600,12 +605,14 @@ set_affiliation(NodeId, Owner, Affiliation) ->
 %% that will be added to the affiliation stored in the main
 %% <tt>pubsub_state</tt> table.</p>
 get_entity_subscriptions(Host, Owner) ->
-    GenKey = jlib:jid_to_string(jlib:jid_remove_resource(Owner)),
+    SubKey = jlib:jid_tolower(Owner),
+    GenKey = jlib:jid_to_string(jlib:jid_remove_resource(SubKey)),
     SHost = host_to_string(Host),
     {ok, Items}=erlsdb:s_all("select * from pubsub where host='"++ SHost ++"' and jid like '"++ GenKey ++"%'"),
 	Subs = lists:map(fun(Subs)->
 	    #pubsub_state{stateid = {J, {_, N}}, subscription = S} = sdb_to_record(Subs),
-	    {N, S, J}
+	    Node = nodetree_default:get_node(Host, N), %%ECE Can't do any better. Need to change mod_pubsub otherwise.
+	    {Node, S, J}
 	   end, Items),
     {result, Subs}.
 
@@ -876,6 +883,7 @@ can_fetch_item(outcast,      _)             -> false;
 can_fetch_item(none,         subscribed)    -> true;
 can_fetch_item(none,         none)          -> false;
 can_fetch_item(_Affiliation, _Subscription) -> false.
+
 
 %% @spec (NodeId) -> Node
 %% @doc retreive pubsubNode() representation giving a NodeId
