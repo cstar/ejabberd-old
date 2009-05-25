@@ -569,7 +569,6 @@ get_entity_affiliations(Host, Owner) ->
     end, [],  Items),
     {result, Affs}.
 
-
 get_node_affiliations(NodeId) ->
     {result, States} = get_states(NodeId),
     Tr = fun(#pubsub_state{stateid = {J, _}, affiliation = A}) ->
@@ -884,7 +883,6 @@ can_fetch_item(none,         subscribed)    -> true;
 can_fetch_item(none,         none)          -> false;
 can_fetch_item(_Affiliation, _Subscription) -> false.
 
-
 %% @spec (NodeId) -> Node
 %% @doc retreive pubsubNode() representation giving a NodeId
 %get_nodename(NodeId) ->
@@ -921,3 +919,4 @@ get_bucket(Host) when is_list(Host)->
     Bucket;
 get_bucket(Host)->
     ?ERROR_MSG("Unsupported host format : ~p", [Host]).
+
