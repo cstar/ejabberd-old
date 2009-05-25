@@ -66,7 +66,7 @@ plain_password_required() ->
     true.
 
 check_password(User, Server, Password) ->
-    LUser = jlib:nodeprep(User),
+    LUser = jlib:nameprep(User),
     LServer = jlib:nodeprep(Server),
     Salt = os:getenv("EJABBERD_SALT"),
     case catch erlsdb:get_attributes(?DOMAIN, LUser ++"@" ++LServer, ["password"]) of
@@ -99,7 +99,7 @@ check_password(User, Server, Password, _StreamID, _Digest) ->
 %    end.
 
 is_user_exists(User, Server) ->
-    LUser = jlib:nodeprep(User),
+    LUser = jlib:nameprep(User),
     LServer = jlib:nodeprep(Server),
     case catch erlsdb:get_attributes(?DOMAIN, LUser ++"@" ++LServer) of
     {ok, []} -> false;
@@ -110,7 +110,7 @@ is_user_exists(User, Server) ->
     end.
 
 set_password(User, Server, Password) ->
-    LUser = jlib:nodeprep(User),
+    LUser = jlib:nameprep(User),
     LServer = jlib:nodeprep(Server),
     if
 	(LUser == error) or (LServer == error) ->
@@ -124,13 +124,13 @@ set_password(User, Server, Password) ->
 
 %% @spec (User, Server, Password) -> {atomic, ok} | {atomic, exists} | {error, invalid_jid} | {aborted, Reason}
 try_register(User, Server, Password) ->
-    LUser = jlib:nodeprep(User),
+    LUser = jlib:nameprep(User),
     LServer = jlib:nameprep(Server),
     if
 	(LUser == error) or (LServer == error) ->
 	    {error, invalid_jid};
 	true ->
-	    case catch erlsdb:get_attributes(?DOMAIN, LUser) of
+	    case catch erlsdb:get_attributes(?DOMAIN,  LUser ++"@" ++LServer) of
             {ok, []} -> 
                 Salt = os:getenv("EJABBERD_SALT"),
                 erlsdb:put_attributes(?DOMAIN, LUser ++"@" ++LServer, [{"password", sha2:hexdigest256(Password ++ Salt)}, {"name", LUser}, {"host", LServer}]),
@@ -198,16 +198,16 @@ get_password_s(_User, _Server) ->
 %% @doc Remove user.
 %% Note: it returns ok even if there was some problem removing the user.
 remove_user(User, Server) ->
-    LUser = jlib:nodeprep(User),
-    LServer = jlib:nameprep(Server),
+    LUser = jlib:nameprep(User),
+    LServer = jlib:nodeprep(Server),
     catch erlsdb:delete_attributes(?DOMAIN, LUser ++"@" ++LServer, ["password", "user", "host"]),
 	ok.
 
 %% @spec (User, Server, Password) -> ok | not_exists | not_allowed | bad_request
 %% @doc Remove user if the provided password is correct.
 remove_user(User, Server, Password) ->
-    LUser = jlib:nodeprep(User),
-    LServer = jlib:nameprep(Server),
+    LUser = jlib:nameprep(User),
+    LServer = jlib:nodeprep(Server),
     case catch erlsdb:get_attributes(?DOMAIN, LUser ++"@" ++LServer, ["password"]) of
     {ok, [{"password", Password}]} ->
 			remove_user(User, Server),
