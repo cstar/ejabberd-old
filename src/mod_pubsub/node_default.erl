@@ -558,7 +558,8 @@ get_entity_affiliations(Host, Owner) ->
     GenKey = jlib:jid_remove_resource(SubKey),
     SGenKey = jlib:jid_to_string(GenKey),
     SHost = host_to_string(Host),
-    {ok, Items}=erlsdb:s_all("select * from pubsub where and host='"++SHost ++"' and jid='" ++ SGenKey ++ "'"),
+    ?DEBUG("select * from pubsub where  host='"++SHost ++"' and jid='" ++ SGenKey ++ "'", []),
+    {ok, Items}=erlsdb:s_all("select * from pubsub where  host='"++SHost ++"' and jid='" ++ SGenKey ++ "%'"),
     Affs = lists:foldl(fun(S,Acc)->
         #pubsub_state{stateid = {_, {_, N}}, affiliation = A} = sdb_to_record(S),
         #pubsub_node{nodeid = {H, _}} = Node = nodetree_default:get_node(Host, N), %%ECE Can't do any better. Need to change mod_pubsub otherwise.
@@ -745,7 +746,7 @@ del_state(NodeId, JID) ->
 %%	   node_default:get_items(NodeId, From).'''</p>
 get_items({Host, Node}, _From) ->
     Items = s3:get_objects(get_bucket(Host), [{prefix,build_key(Host, Node,"")}] ),
-    {result, lists:map(fun({_K, Conf})->
+    {result, lists:map(fun({_K, Conf, _H})->
         binary_to_term(list_to_binary(Conf))
     end, Items)}.
 get_items(NodeId, JID, AccessModel, PresenceSubscription, RosterGroup, _SubId) ->

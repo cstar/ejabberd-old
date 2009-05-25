@@ -103,11 +103,15 @@ set_node(#pubsub_node{nodeid = NodeId}=N)->
     
 set_node(_) ->
     {error, ?ERR_INTERNAL_SERVER_ERROR}.
-
+make_key({{_U, _S, _R}=JID, ""})->
+    SHost = jlib:jid_to_string(JID),
+    ?PREFIX++SHost ++ ":";
 make_key({{_U, _S, _R}=JID, Node})->
     SNode = mod_pubsub:node_to_string(Node),
     SHost = jlib:jid_to_string(JID),
     ?PREFIX++SHost ++ ":" ++ SNode;
+make_key({Host, ""})->
+    ?PREFIX++Host ++ ":";
 make_key({Host, Node})->
     SNode = mod_pubsub:node_to_string(Node),
     ?PREFIX++Host ++ ":" ++ SNode.
@@ -151,6 +155,7 @@ get_nodes(Key, _From) ->
 %%     Key = mod_pubsub:host() | mod_pubsub:jid()
 get_nodes(Key) ->
     K=make_key({Key, ""}),
+    ?DEBUG("Key : ~s", [K]),
     Nodes =  s3:get_objects(get_bucket(Key), [{prefix, K}]),
     lists:map(fun({_K, Bin, _H})-> binary_to_term(list_to_binary(Bin)) end, Nodes).
 
