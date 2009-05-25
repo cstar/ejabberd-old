@@ -23,3 +23,4 @@ src/stringprep_drv.so.dSYM/Contents/Info.plist
 src/stringprep_drv.so.dSYM/Contents/Resources/DWARF/stringprep_drv.so
 src/tls_drv.so.dSYM/Contents/Info.plist
 src/tls_drv.so.dSYM/Contents/Resources/DWARF/tls_drv.so
+ChangeLog
