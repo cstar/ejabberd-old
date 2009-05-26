@@ -83,7 +83,6 @@ init(Host, ServerHost, Opts) ->
     end,
     ets:insert(gen_mod:get_module_proc(Host, pubsub_state), {s3_bucket, Bucket}),
     ets:insert(gen_mod:get_module_proc(ServerHost, pubsub_state), {s3_bucket, Bucket}),
-    s3:start(),
     ok.
 terminate(_Host, _ServerHost) ->
     ok.
@@ -103,14 +102,14 @@ set_node(#pubsub_node{nodeid = NodeId}=N)->
     
 set_node(_) ->
     {error, ?ERR_INTERNAL_SERVER_ERROR}.
-make_key({{_U, _S, _R}=JID, ""})->
+make_key({{_U, _S, _R}=JID, []})->
     SHost = jlib:jid_to_string(JID),
     ?PREFIX++SHost ++ ":";
 make_key({{_U, _S, _R}=JID, Node})->
     SNode = mod_pubsub:node_to_string(Node),
     SHost = jlib:jid_to_string(JID),
     ?PREFIX++SHost ++ ":" ++ SNode;
-make_key({Host, ""})->
+make_key({Host, []})->
     ?PREFIX++Host ++ ":";
 make_key({Host, Node})->
     SNode = mod_pubsub:node_to_string(Node),
@@ -131,6 +130,7 @@ get_bucket(Host) when is_list(Host)->
     Bucket;
 get_bucket(Host)->
     ?ERROR_MSG("Unsupported host format : ~p", [Host]).
+    
 get_node(Host, Node, _From) ->
     get_node(Host, Node).
 %% @spec (Host, Node) -> pubsubNode() | {error, Reason}
@@ -154,7 +154,7 @@ get_nodes(Key, _From) ->
 %% @spec (Key) -> [pubsubNode()] | {error, Reason}
 %%     Key = mod_pubsub:host() | mod_pubsub:jid()
 get_nodes(Key) ->
-    K=make_key({Key, ""}),
+    K=make_key({Key, []}),
     ?DEBUG("Key : ~s", [K]),
     Nodes =  s3:get_objects(get_bucket(Key), [{prefix, K}]),
     lists:map(fun({_K, Bin, _H})-> binary_to_term(list_to_binary(Bin)) end, Nodes).
