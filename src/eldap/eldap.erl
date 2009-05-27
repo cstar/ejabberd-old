@@ -99,11 +99,10 @@
 -define(MIN_TRANSACTION_ID, 0).
 %% Grace period after "soft" LDAP bind errors:
 -define(GRACEFUL_RETRY_TIMEOUT, 5000).
-
-
 -define(SUPPORTEDEXTENSION, "1.3.6.1.4.1.1466.101.120.7").
 -define(SUPPORTEDEXTENSIONSYNTAX, "1.3.6.1.4.1.1466.115.121.1.38").
 -define(STARTTLS, "1.3.6.1.4.1.1466.20037").
+
 
 -record(eldap, {version = ?LDAP_VERSION,
 		hosts,         % Possible hosts running LDAP servers
