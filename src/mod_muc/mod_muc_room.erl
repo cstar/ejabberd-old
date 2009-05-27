@@ -1814,7 +1814,6 @@ get_service_max_users(ServerHost) ->
 			   mod_muc, max_users, ?MAX_USERS_DEFAULT).
 
 
-
 count_stanza_shift(Nick, Els, StateData) ->
     HL = lqueue_to_list(StateData#state.history),
     Since = extract_history(Els, "since"),
@@ -2253,8 +2252,8 @@ send_kickban_presence1(UJID, Reason, Code, Headers) ->
 		jlib:jid_replace_resource(Headers#headers.jid, Nick),
 		Info#user.jid,
 		Packet)
-      end, ?DICT:to_list(Headers#headers.users)).
 
+      end, ?DICT:to_list(Headers#headers.users)).
 
 destroy_room(DEl, #headers{}=Headers) ->
     destroy_room(DEl, headers_to_state(Headers));

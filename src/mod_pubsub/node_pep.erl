@@ -168,8 +168,21 @@ purge_node(NodeId, Owner) ->
     node_default:purge_node(NodeId, Owner).
 
 get_entity_affiliations(_Host, Owner) ->
-    OwnerKey = jlib:jid_tolower(jlib:jid_remove_resource(Owner)),
-    node_default:get_entity_affiliations(OwnerKey, Owner).
+    {_, D, _} = SubKey = jlib:jid_tolower(Owner),
+    SubKey = jlib:jid_tolower(Owner),
+    GenKey = jlib:jid_remove_resource(SubKey),
+    States = mnesia:match_object(#pubsub_state{stateid = {GenKey, '_'}, _ = '_'}),
+    NodeTree = case ets:lookup(gen_mod:get_module_proc(D, pubsub_state), nodetree) of
+	    [{nodetree, N}] -> N;
+	    _ -> nodetree_default
+	end,
+    Reply = lists:foldl(fun(#pubsub_state{stateid = {_, N}, affiliation = A}, Acc) ->
+	case NodeTree:get_node(N) of
+	    #pubsub_node{nodeid = {{_, D, _}, _}} = Node -> [{Node, A}|Acc];
+	    _ -> Acc
+	end
+    end, [], States),
+    {result, Reply}.
 
 get_node_affiliations(NodeId) ->
     node_default:get_node_affiliations(NodeId).
@@ -179,6 +192,7 @@ get_affiliation(NodeId, Owner) ->
 
 set_affiliation(NodeId, Owner, Affiliation) ->
     node_default:set_affiliation(NodeId, Owner, Affiliation).
+
 
 get_entity_subscriptions(Host, Owner) ->
     node_default:get_entity_subscriptions(Host, Owner).
@@ -204,6 +218,7 @@ get_entity_subscriptions(Host, Owner) ->
 	%end
     %end, [], States),
     %{result, Reply}.
+
 
 get_node_subscriptions(NodeId) ->
     %% note: get_node_subscriptions is used for broadcasting
@@ -266,4 +281,3 @@ complain_if_modcaps_disabled(ServerHost) ->
 	_ ->
 	    ok
     end.
-

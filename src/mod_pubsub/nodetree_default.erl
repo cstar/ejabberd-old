@@ -47,6 +47,7 @@
 	 set_node/1,
 	 get_node/3,
 	 get_node/2,
+	 get_node/1,
 	 get_nodes/2,
 	 get_nodes/1,
 	 get_subnodes/3,
@@ -146,7 +147,8 @@ get_node(Host, Node) ->
         _ -> 
             {error, ?ERR_ITEM_NOT_FOUND}
     end.  
-
+get_node({Host, Node}) ->
+  get_node(Host, Node).
 
 get_nodes(Key, _From) ->
     get_nodes(Key).

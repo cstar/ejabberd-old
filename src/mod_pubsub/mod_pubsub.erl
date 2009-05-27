@@ -444,8 +444,6 @@ send_loop(State) ->
 	send_loop(State);
     {presence, User, Server, Resources, JID} ->
 	%% get resources caps and check if processing is needed
-	%% get_caps may be blocked few seconds, get_caps as well
-	%% so we spawn the whole process not to block other queries
 	spawn(fun() ->
 	    {HasCaps, ResourcesCaps} = lists:foldl(fun(Resource, {R, L}) ->
 			case mod_caps:get_caps({User, Server, Resource}) of
@@ -1975,29 +1973,16 @@ get_items(Host, Node, From, SubId, SMaxItems, ItemIDs) ->
 %%	 Number = last | integer()
 %% @doc <p>Resend the items of a node to the user.</p>
 %% @todo use cache-last-item feature
+send_items(Host, Node, NodeId, Type, LJID, last) ->
+    send_items(Host, Node, NodeId, Type, LJID, 1);
 send_items(Host, Node, NodeId, Type, LJID, Number) ->
     ToSend = case node_action(Host, Type, get_items, [NodeId, LJID]) of
 	{result, []} -> 
 	    [];
 	{result, Items} ->
 	    case Number of
-		last ->
-		    %%% [lists:last(Items)]  does not work on clustered table
-		    [First|Tail] = Items,
-		    [lists:foldl(
-			fun(CurItem, LastItem) ->
-			    {LTimeStamp, _} = LastItem#pubsub_item.creation,
-			    {CTimeStamp, _} = CurItem#pubsub_item.creation,
-			    if
-				CTimeStamp > LTimeStamp -> CurItem;
-				true -> LastItem
-			    end
-			end, First, Tail)];
-		N when N > 0 ->
-		    %%% This case is buggy on clustered table due to lack of order
-		    lists:nthtail(length(Items)-N, Items);
-		_ ->
-		    Items
+		N when N > 0 -> lists:sublist(Items, N);
+		_ -> Items
 	    end;
 	_ ->
 	    []
@@ -3004,6 +2989,7 @@ tree_call(Host, Function, Args) ->
     end,
     catch apply(Module, Function, Args).
 tree_action(Host, Function, Args) ->
+    ?DEBUG("tree_action ~p ~p ~p",[Host,Function,Args]),
     Fun = fun() -> tree_call(Host, Function, Args) end,
     catch mnesia:sync_dirty(Fun).
 
@@ -3023,7 +3009,8 @@ node_call(Type, Function, Args) ->
 	Result -> {result, Result} %% any other return value is forced as result
     end.
 
-node_action(_Host, Type, Function, Args) ->
+node_action(Host, Type, Function, Args) ->
+    ?DEBUG("node_action ~p ~p ~p ~p",[Host,Type,Function,Args]),
     transaction(fun() ->
 			node_call(Type, Function, Args)
 		end, sync_dirty).
