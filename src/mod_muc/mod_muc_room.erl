@@ -605,6 +605,10 @@ handle_sync_event(get_state, _From, StateName, StateData) ->
 %    {reply, {ok, NSD#state.config}, StateName, NSD};
 handle_sync_event({change_state, NewStateData}, _From, StateName, _StateData) ->
     {reply, {ok, NewStateData}, StateName, NewStateData};
+handle_sync_event({get_disco_item, JID, Lang}, _From,_StateName, StateData)->
+    UserInfo = get_user_info(JID, StateData),
+    Config = StateData#state.config,
+    handler_call(get_disco_item, [UserInfo, Lang,Config], StateData);
 handle_sync_event(Event, From, StateName, StateData) ->
     {Return,Values,NewState} = handler_call(handle_sync_event, [Event, From], StateData),
     {reply, {Return, Values}, StateName, NewState}.
@@ -866,7 +870,9 @@ process_iq(UserInfo,Aff, ?NS_MUC_OWNER , set, Lang, SubEl, State) ->
 process_iq(UserInfo,Affiliation, ?NS_MUC_OWNER, get, Lang, _SubEl,State) ->
 	handler_call(get_config,[UserInfo, Affiliation, Lang], State);
 	
-	
+process_iq(UserInfo, Affiliation, ?NS_DISCO_INFO=XMLNS, get=Type, Lang, _SubEl, State) ->
+    handler_call(get_disco_info, [UserInfo, Lang, nil], State);
+    	
 process_iq(UserInfo, FAffiliation, XMLNS, Type, Lang, SubEl, State)->
     handler_call(process_iq, [UserInfo, FAffiliation, XMLNS, Type, Lang, SubEl], State).
 

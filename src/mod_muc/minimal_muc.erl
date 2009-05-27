@@ -28,7 +28,9 @@
          handle_info/2,
          handle_sync_event/3,
          list_to_role/2,
-         list_to_affiliation/2]).
+         list_to_affiliation/2,
+         get_disco_info/4,
+         get_disco_item/4]).
 
 %% @spec (DefRoomOpts, Creator, Nick::string(), Headers)->
 %%        {result, ok, Headers} | {error, Why, Headers}

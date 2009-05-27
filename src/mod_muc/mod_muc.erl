@@ -514,6 +514,34 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 		[] ->		    
 		    Type = xml:get_attr_s("type", Attrs),
 		    case {Name, Type} of
+		    {"iq", "get"}-> %% Special case for handling disco for non running rooms.
+		        case jlib:iq_query_info(Packet) of 
+				#iq{type = get, xmlns = ?NS_DISCO_INFO = XMLNS,
+ 				    sub_el = _SubEl, lang = Lang} = IQ ->
+ 				    case Storage:restore_room(Host, ServerHost, Room) of
+		                {Handler, Opts} ->
+ 				            IQRes = Handler:get_disco_info({not_in_room, From}, Lang, Opts, nil),
+ 				            Res = IQ#iq{type = result,
+							sub_el =
+							[{xmlelement, "query",
+							  [{"xmlns", XMLNS}],
+							  IQRes}]},
+					          ejabberd_router:route(
+					          To, From, jlib:iq_to_xml(Res));
+ 				        error -> 
+ 				            Lang = xml:get_attr_s("xml:lang", Attrs),
+			                ErrText = "Room does not exist",
+			                Err = jlib:make_error_reply(
+				                Packet, ?ERRT_ITEM_NOT_FOUND(Lang, ErrText)),
+			                ejabberd_router:route(To, From, Err)
+			        end;
+			    _ ->
+			         Lang = xml:get_attr_s("xml:lang", Attrs),
+			                ErrText = "Conference room does not exist",
+			                Err = jlib:make_error_reply(
+				                Packet, ?ERRT_ITEM_NOT_FOUND(Lang, ErrText)),
+			                ejabberd_router:route(To, From, Err)
+                end;
 			{"presence", ""} ->
 			    case Storage:restore_room(Host, ServerHost, Room) of
 		        {Handler, Opts} ->
@@ -596,7 +624,7 @@ iq_disco_items(Host, ServerHost, From, Lang, none, Storage) ->
     lists:zf(
         fun(#muc_online_room{name_host = {Name, _Host}, pid = Pid}) ->
 		     case catch gen_fsm:sync_send_all_state_event(
-				  Pid, {get_disco_item, From, Lang}, 100) of
+				  Pid, {get_disco_item, From, Lang, nil}, 100) of
 			 {ok, {item, Desc}} ->
 			     flush(),
 			     {true,
