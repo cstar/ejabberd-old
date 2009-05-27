@@ -560,9 +560,13 @@ get_entity_affiliations(Host, Owner) ->
     SHost = host_to_string(Host),
     ?DEBUG("select * from pubsub where  host='"++SHost ++"' and jid='" ++ SGenKey ++ "'", []),
     {ok, Items}=erlsdb:s_all("select * from pubsub where  host='"++SHost ++"' and jid='" ++ SGenKey ++ "%'"),
+    NodeTree = case ets:lookup(gen_mod:get_module_proc(Host, pubsub_state), nodetree) of
+	    [{nodetree, NT}] -> NT;
+	    _ -> nodetree_default
+	end,
     Affs = lists:foldl(fun(S,Acc)->
         #pubsub_state{stateid = {_, {_, N}}, affiliation = A} = sdb_to_record(S),
-        #pubsub_node{nodeid = {H, _}} = Node = nodetree_default:get_node(Host, N), %%ECE Can't do any better. Need to change mod_pubsub otherwise.
+        #pubsub_node{nodeid = {H, _}} = Node = NodeTree:get_node(Host, N), %%ECE Can't do any better. Need to change mod_pubsub otherwise.
         case H of
 		    Host -> [{Node, A}|Acc];
 		    _ -> Acc
@@ -605,16 +609,22 @@ set_affiliation(NodeId, Owner, Affiliation) ->
 %% that will be added to the affiliation stored in the main
 %% <tt>pubsub_state</tt> table.</p>
 get_entity_subscriptions(Host, Owner) ->
+
     SubKey = jlib:jid_tolower(Owner),
     GenKey = jlib:jid_to_string(jlib:jid_remove_resource(SubKey)),
     SHost = host_to_string(Host),
     {ok, Items}=erlsdb:s_all("select * from pubsub where host='"++ SHost ++"' and jid like '"++ GenKey ++"%'"),
+	NodeTree = case ets:lookup(gen_mod:get_module_proc(Host, pubsub_state), nodetree) of
+	    [{nodetree, NT}] -> NT;
+	    _ -> nodetree_default
+	end,
 	Subs = lists:map(fun(Subs)->
 	    #pubsub_state{stateid = {J, {_, N}}, subscription = S} = sdb_to_record(Subs),
-	    Node = nodetree_default:get_node(Host, N), %%ECE Can't do any better. Need to change mod_pubsub otherwise.
+	    Node = NodeTree:get_node(Host, N), %%ECE Can't do any better. Need to change mod_pubsub otherwise.
 	    {Node, S, J}
 	   end, Items),
     {result, Subs}.
+
 
 get_node_subscriptions(NodeId) ->
     {result, States} = get_states(NodeId),
@@ -746,9 +756,11 @@ del_state(NodeId, JID) ->
 %%	   node_default:get_items(NodeId, From).'''</p>
 get_items({Host, Node}, _From) ->
     Items = s3:get_objects(get_bucket(Host), [{prefix,build_key(Host, Node,"")}] ),
-    {result, lists:map(fun({_K, Conf, _H})->
+    Items2 = lists:map(fun({_K, Conf, _H})->
         binary_to_term(list_to_binary(Conf))
-    end, Items)}.
+    end, Items),
+    {result, lists:reverse(lists:keysort(#pubsub_item.modification, Items2))}.
+
 get_items(NodeId, JID, AccessModel, PresenceSubscription, RosterGroup, _SubId) ->
     SubKey = jlib:jid_tolower(JID),
     GenKey = jlib:jid_remove_resource(SubKey),
@@ -920,4 +932,5 @@ get_bucket(Host) when is_list(Host)->
     Bucket;
 get_bucket(Host)->
     ?ERROR_MSG("Unsupported host format : ~p", [Host]).
+
 

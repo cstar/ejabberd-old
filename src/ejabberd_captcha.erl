@@ -17,7 +17,7 @@
 	 terminate/2, code_change/3]).
 
 -export([create_captcha/6, build_captcha_html/2, check_captcha/2,
-	 process_reply/1, process/2]).
+	 process_reply/1, process/2, is_feature_available/0]).
 
 -include("jlib.hrl").
 -include("ejabberd.hrl").
@@ -26,11 +26,6 @@
 -define(VFIELD(Type, Var, Value),
 	{xmlelement, "field", [{"type", Type}, {"var", Var}],
 	 [{xmlelement, "value", [], [Value]}]}).
-
--define(CAPTCHA_BODY(Lang, Room, URL),
-	translate:translate(Lang, "Your messages to ") ++ Room
-	++ translate:translate(Lang, " are being blocked. To unblock them, visit ")
-	++ URL).
 
 -define(CAPTCHA_TEXT(Lang), translate:translate(Lang, "Enter the text you see")).
 -define(CAPTCHA_LIFETIME, 120000). % two minutes
@@ -76,12 +71,14 @@ create_captcha(Id, SID, From, To, Lang, Args)
 		    ?VFIELD("hidden", "from", {xmlcdata, jlib:jid_to_string(To)}),
 		    ?VFIELD("hidden", "challenge", {xmlcdata, Id}),
 		    ?VFIELD("hidden", "sid", {xmlcdata, SID}),
-		    {xmlelement, "field", [{"var", "ocr"}],
+		    {xmlelement, "field", [{"var", "ocr"}, {"label", ?CAPTCHA_TEXT(Lang)}],
 		     [{xmlelement, "media", [{"xmlns", ?NS_MEDIA}],
 		       [{xmlelement, "uri", [{"type", Type}],
 			 [{xmlcdata, "cid:" ++ CID}]}]}]}]}]},
+	    BodyString1 = translate:translate(Lang, "Your messages to ~s are being blocked. To unblock them, visit ~s"),
+	    BodyString = io_lib:format(BodyString1, [JID, get_url(Id)]),
 	    Body = {xmlelement, "body", [],
-		    [{xmlcdata, ?CAPTCHA_BODY(Lang, JID, get_url(Id))}]},
+		    [{xmlcdata, BodyString}]},
 	    OOB = {xmlelement, "x", [{"xmlns", ?NS_OOB}],
 		   [{xmlelement, "url", [], [{xmlcdata, get_url(Id)}]}]},
 	    Tref = erlang:send_after(?CAPTCHA_LIFETIME, ?MODULE, {remove_id, Id}),
@@ -230,6 +227,7 @@ init([]) ->
 			[{ram_copies, [node()]},
 			 {attributes, record_info(fields, captcha)}]),
     mnesia:add_table_copy(captcha, node(), ram_copies),
+    check_captcha_setup(),
     {ok, #state{}}.
 
 handle_call(_Request, _From, State) ->
@@ -362,3 +360,28 @@ return(Port, TRef, Result) ->
     end,
     catch port_close(Port),
     Result.
+
+is_feature_enabled() ->
+    case get_prog_name() of
+	"" -> false;
+	Prog when is_list(Prog) -> true
+    end.
+
+is_feature_available() ->
+    case is_feature_enabled() of
+	false -> false;
+	true ->
+	    case create_image() of
+		{ok, _, _, _} -> true;
+		_Error -> false
+	    end
+    end.
+
+check_captcha_setup() ->
+    case is_feature_enabled() andalso not is_feature_available() of
+	true ->
+	    ?CRITICAL_MSG("Captcha is enabled in the option captcha_cmd, "
+			  "but it can't generate images.", []);
+	false ->
+	    ok
+    end.
