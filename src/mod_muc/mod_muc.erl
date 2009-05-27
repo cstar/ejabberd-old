@@ -519,8 +519,8 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 				#iq{type = get, xmlns = ?NS_DISCO_INFO = XMLNS,
  				    sub_el = _SubEl, lang = Lang} = IQ ->
  				    case Storage:restore_room(Host, ServerHost, Room) of
-		                {Handler, Opts} ->
- 				            IQRes = Handler:get_disco_info({not_in_room, From}, Lang, Opts, nil),
+		                {RoomHandler, RoomOpts} ->
+ 				            IQRes = RoomHandler:get_disco_info({not_in_room, From}, Lang, RoomOpts, nil),
  				            Res = IQ#iq{type = result,
 							sub_el =
 							[{xmlelement, "query",
@@ -528,23 +528,24 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 							  IQRes}]},
 					          ejabberd_router:route(
 					          To, From, jlib:iq_to_xml(Res));
- 				        error -> 
+ 				        E -> 
  				            Lang = xml:get_attr_s("xml:lang", Attrs),
 			                ErrText = "Room does not exist",
 			                Err = jlib:make_error_reply(
 				                Packet, ?ERRT_ITEM_NOT_FOUND(Lang, ErrText)),
 			                ejabberd_router:route(To, From, Err)
 			        end;
-			    _ ->
-			         Lang = xml:get_attr_s("xml:lang", Attrs),
-			                ErrText = "Conference room does not exist",
-			                Err = jlib:make_error_reply(
-				                Packet, ?ERRT_ITEM_NOT_FOUND(Lang, ErrText)),
-			                ejabberd_router:route(To, From, Err)
+			    E ->
+			        ?DEBUG("IQ : ~p",[E]),
+			        Lang = xml:get_attr_s("xml:lang", Attrs),
+			        ErrText = "Conference room does not exist",
+			        Err = jlib:make_error_reply(
+				     Packet, ?ERRT_ITEM_NOT_FOUND(Lang, ErrText)),
+			        ejabberd_router:route(To, From, Err)
                 end;
 			{"presence", ""} ->
 			    case Storage:restore_room(Host, ServerHost, Room) of
-		        {Handler, Opts} ->
+		        {RoomHandler, RoomOpts} ->
 		            ?DEBUG("MUC: Restoring room '~s'~n", [Room]),
 		            {ok, Pid} = mod_muc_room:start(
 				        Host,
@@ -553,8 +554,8 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 				        Room,
 				        HistorySize,
 				        RoomShaper,
-				        Opts,
-				        Handler,
+				        RoomOpts,
+				        RoomHandler,
 				        Storage),
 		            register_room(Host, Room, Pid),
 		            mod_muc_room:route(Pid, From, Nick, Packet),

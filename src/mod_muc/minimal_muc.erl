@@ -117,6 +117,21 @@ process_iq(UserInfo, FAffiliation, XMLNS, Type, Lang, SubEl,Headers)->{error, ?E
 %% It is possible to block presence delivery or modify presence before delivery
 process_presence(From, Packet, Nick,Lang,Headers)->{allow, Packet}.
 
+get_disco_item(User, Lang, Opts, #headers{subject=Subject}=Headers)->
+    {item, Subject}.
+get_disco_info(From, Lang, Opts, Headers)->
+    Title = if Headers =:= nil ->
+            proplists:get_value(teaser, Opts);
+        true ->
+            Headers#headers.subject
+    end,
+    [{xmlelement, "identity",
+	       [{"category", "conference"},
+		{"type", "text"},
+		{"name", "Chatroom"}], []},
+	      {xmlelement, "feature",
+	       [{"var", ?NS_MUC}], []}].
+
 % FSM Processing
 handle_sync_event({get_disco_item, JID, Lang}, _From, Headers)->
     Len = ?DICT:fold(fun(_, _, Acc) -> Acc + 1 end, 0,

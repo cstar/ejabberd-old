@@ -76,6 +76,7 @@
 	 unsubscribe_node/5,
 	 publish_item/6,
 	 delete_item/4,
+	 get_items/6,
 	 send_items/6,
 	 broadcast_stanza/7,
 	 get_configure/5,
