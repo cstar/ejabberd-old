@@ -33,7 +33,7 @@
 %%% useable and useful as is. Please, send us comments, feedback and
 %%% improvements.</p>
 
--module(nodetree_default).
+-module(nodetree_tree).
 -author('christophe.romain@process-one.net').
 
 -include("pubsub.hrl").
@@ -82,8 +82,8 @@ init(Host, ServerHost, Opts) ->
             ?INFO_MSG("S3 bucket ~s created", [Bucket]);
         true -> ok
     end,
-    ets:insert(gen_mod:get_module_proc(Host, pubsub_state), {s3_bucket, Bucket}),
-    ets:insert(gen_mod:get_module_proc(ServerHost, pubsub_state), {s3_bucket, Bucket}),
+    ets:insert(gen_mod:get_module_proc(Host, config), {s3_bucket, Bucket}),
+    ets:insert(gen_mod:get_module_proc(ServerHost, config), {s3_bucket, Bucket}),
     ok.
 terminate(_Host, _ServerHost) ->
     ok.
@@ -127,7 +127,7 @@ get_bucket({{_U, S, _R}, _Node})->
 get_bucket({Host, _Node})->
     get_bucket(Host);
 get_bucket(Host) when is_list(Host)->
-    [{s3_bucket, Bucket}] =  ets:lookup(gen_mod:get_module_proc(Host, pubsub_state), s3_bucket),
+    [{s3_bucket, Bucket}] =  ets:lookup(gen_mod:get_module_proc(Host, config), s3_bucket),
     Bucket;
 get_bucket(Host)->
     ?ERROR_MSG("Unsupported host format : ~p", [Host]).

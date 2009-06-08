@@ -39,6 +39,12 @@
 -include("ejabberd_http.hrl").
 -include("ejabberd_web_admin.hrl").
 
+-define(INPUTATTRS(Type, Name, Value, Attrs),
+	?XA("input", Attrs ++
+	    [{"type", Type},
+	     {"name", Name},
+	     {"value", Value}])).
+
 
 process(["doc", LocalFile], _Request) ->
     DocPath = case os:getenv("EJABBERD_DOC_PATH") of
@@ -145,6 +151,8 @@ make_xhtml(Els, Host, Node, Lang) ->
 	[?XCT("title", "ejabberd Web Admin"),
 	 {xmlelement, "meta", [{"http-equiv", "Content-Type"},
 			       {"content", "text/html; charset=utf-8"}], []},
+	 {xmlelement, "script", [{"src", Base ++ "/additions.js"},
+				 {"type", "text/javascript"}], [?C(" ")]},
 	 {xmlelement, "link", [{"href", Base ++ "favicon.ico"},
 			       {"type", "image/x-icon"},
 			       {"rel", "shortcut icon"}], []},
@@ -183,6 +191,24 @@ get_base_path(global, cluster) -> "/admin/";
 get_base_path(Host, cluster) -> "/admin/server/" ++ Host ++ "/";
 get_base_path(global, Node) -> "/admin/node/" ++ atom_to_list(Node) ++ "/";
 get_base_path(Host, Node) -> "/admin/server/" ++ Host ++ "/node/" ++ atom_to_list(Node) ++ "/".
+
+additions_js() ->
+"
+function selectAll() {
+  for(i=0;i<document.forms[0].elements.length;i++)
+  { var e = document.forms[0].elements[i];
+    if(e.type == 'checkbox')
+    { e.checked = true; }
+  }
+}
+function unSelectAll() {
+  for(i=0;i<document.forms[0].elements.length;i++)
+  { var e = document.forms[0].elements[i];
+    if(e.type == 'checkbox')
+    { e.checked = false; }
+  }
+}
+".
 
 css(Host) ->
     Base = get_base_path(Host, cluster),
@@ -273,7 +299,7 @@ html>body #container {
   font-family: Verdana, Arial, Helvetica, sans-serif; 
   font-size: 8pt;
   font-weight: bold;
-  background: #d47911;
+  border-top: 1px solid #d47911;
   width: 17em;
 }
 
@@ -289,7 +315,8 @@ html>body #container {
   display: block;
   padding: 3px 6px 3px 9px;
   border-left: 1em solid #ffc78c;
-  border-top: 1px solid #d47911;
+  border-right: 1px solid #d47911;
+  border-bottom: 1px solid #d47911;
   background: #ffe3c9;
   text-decoration: none;
 }
@@ -310,19 +337,19 @@ html>body #container {
 
 ul li #navhead a, ul li #navheadsub a, ul li #navheadsubsub a {
   text-align: center;
-  border-top: 2px solid #d47911;
-  border-bottom: 1px solid #d47911;
+  border-top: 1px solid #d47911;
+  border-bottom: 2px solid #d47911;
   background: #FED6A6;
 }
 
 #navheadsub, #navitemsub {
   border-left: 7px solid white;
-  margin-left: 2px solid #d47911;
+  margin-left: 2px;
 }
 
 #navheadsubsub, #navitemsubsub {
   border-left: 14px solid white;
-  margin-left: 4px solid #d47911;
+  margin-left: 4px;
 }
 
 #lastactivity li {
@@ -519,6 +546,10 @@ h3 {
   padding-left: 10px;
 }
 
+#content ul.nolistyle>li {
+  list-style-type: none;
+}
+
 #content li.big {
   font-size: 10pt;
 }
@@ -639,6 +670,9 @@ process_admin(_Host, #request{path = ["logo.png"]}) ->
 
 process_admin(_Host, #request{path = ["logo-fill.png"]}) ->
     {200, [{"Content-Type", "image/png"}, last_modified(), cache_control_public()], logo_fill()};
+
+process_admin(_Host, #request{path = ["additions.js"]}) ->
+    {200, [{"Content-Type", "text/javascript"}, last_modified(), cache_control_public()], additions_js()};
 
 process_admin(Host,
 	      #request{path = ["acls-raw"],
@@ -1927,9 +1961,28 @@ get_node(global, Node, ["update"], Query, Lang) ->
 	    [] ->
 		?CT("None");
 	    _ ->
-		?XE("ul",
-		    [?LI([?C(atom_to_list(Beam))]) ||
-			Beam <- UpdatedBeams])
+		BeamsLis =
+		    lists:map(
+		      fun(Beam) ->
+			      BeamString = atom_to_list(Beam),
+			      ?LI([
+				   ?INPUT("checkbox", "selected", BeamString),
+				   %%?XA("input", [{"checked", ""}, %% Selected by default
+					%%	 {"type", "checkbox"},
+					%%	 {"name", "selected"},
+					%%	 {"value", BeamString}]),
+				   ?C(BeamString)])
+		      end,
+		      UpdatedBeams),
+		SelectButtons =
+		    [?BR,
+		     ?INPUTATTRS("button", "selectall", "Select All",
+				 [{"onClick", "selectAll()"}]),
+		     ?C(" "),
+		     ?INPUTATTRS("button", "unselectall", "Unselect All",
+				 [{"onClick", "unSelectAll()"}])],
+		%%?XE("ul", BeamsLis)
+		?XAE("ul", [{"class", "nolistyle"}], BeamsLis ++ SelectButtons)
 	end,
     FmtScript = ?XC("pre", io_lib:format("~p", [Script])),
     FmtLowLevelScript = ?XC("pre", io_lib:format("~p", [LowLevelScript])),
@@ -1946,6 +1999,7 @@ get_node(global, Node, ["update"], Query, Lang) ->
 	       ?XCT("h3", "Update script"), FmtScript,
 	       ?XCT("h3", "Low level update script"), FmtLowLevelScript,
 	       ?XCT("h3", "Script check"), ?XC("pre", atom_to_list(Check)),
+	       ?BR,
 	       ?INPUTT("submit", "update", "Update")
 	      ])
 	];
@@ -2268,7 +2322,9 @@ node_modules_parse_query(Host, Node, Modules, Query) ->
 node_update_parse_query(Node, Query) ->
     case lists:keysearch("update", 1, Query) of
 	{value, _} ->
-	    case rpc:call(Node, ejabberd_update, update, []) of
+	    ModulesToUpdateStrings = proplists:get_all_values("selected",Query),
+	    ModulesToUpdate = [list_to_atom(M) || M <- ModulesToUpdateStrings],
+	    case rpc:call(Node, ejabberd_update, update, [ModulesToUpdate]) of
 		{ok, _} ->
 		    ok;
 		{error, Error} ->
