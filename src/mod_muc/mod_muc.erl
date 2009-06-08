@@ -35,9 +35,9 @@
 	 start/2,
 	 stop/1,
 	 room_destroyed/4,
-	 store_room/5,
-	 restore_room/3,
-	 forget_room/3,
+	 store_room/6,
+	 restore_room/4,
+	 forget_room/4,
 	 create_room/5,
 	 create_room/6,
 	 start_room/2,
@@ -52,7 +52,7 @@
 -include("jlib.hrl").
 -include("mod_muc.hrl").
 
--record(muc_online_room, {name_host, pid}).
+
 -record(muc_registered, {us_host, nick}).
 
 -record(state, {host,
@@ -126,17 +126,17 @@ get_storage(ServerHost) ->
     Proc = gen_mod:get_module_proc(ServerHost, ?PROCNAME),
     gen_server:call(Proc, get_storage).
     
-store_room(ServerHost,Host, Type, Name, Opts) ->
+store_room(ServerHost,Host, Type, Name, Opts, From) ->
     H = get_storage(ServerHost),
-    H:store_room(Host,ServerHost, Type, Name, Opts).
+    H:store_room(Host,ServerHost, Type, Name, Opts, From).
 
-restore_room(ServerHost,Host, Name) ->
+restore_room(ServerHost,Host, Name, From) ->
     H = get_storage(ServerHost),
-    H:restore_room(Host,ServerHost, Name).
+    H:restore_room(Host,ServerHost, Name, From).
 
-forget_room(ServerHost,Host, Name) ->
+forget_room(ServerHost,Host, Name, From) ->
     H = get_storage(ServerHost),
-    H:forget_room(Host,ServerHost, Name).
+    H:forget_room(Host,ServerHost, Name, From).
 
 process_iq_disco_items(Host, ServerHost, From, To, #iq{lang = Lang} = IQ, Storage) ->
     Rsm = jlib:rsm_decode(IQ),
@@ -234,18 +234,31 @@ init([Host, Opts]) ->
 handle_call(stop, _From, State) ->
     {stop, normal, ok, State};
 
+handle_call({reload, Room, From}, _From, #state{storage=Storage, server_host=ServerHost, host=Host}=State) ->
+    case mnesia:dirty_read(muc_online_room, {Room, Host}) of
+		[] ->
+		  {reply, not_running, State};
+		[Pid] ->
+		    case Storage:restore_room(Host, ServerHost, Room, From) of
+		        {_Handler, Opts} -> 
+		            Result = gen_fsm:sync_send_all_state_event(Pid, {reload, Opts}, 500),
+		            {reply, Result, State};
+		        Error -> {reply, Error, State}
+		    end
+	end ;   
+    
+
+
 handle_call(get_storage,_From,#state{storage=Handler}=State )->
     {reply, Handler, State};
     
-    
-handle_call({start,Room},_From,#state{host = Host,
+handle_call({start,Room, From},_From,#state{host = Host,
 		   server_host = ServerHost,
 		   access = Access,
-		   default_room_opts = DefOpts,
 		   history_size = HistorySize,
 		   room_shaper = RoomShaper,
 		   storage = Storage } = State)->
-	case Storage:restore_room(Host, ServerHost, Room) of
+	case Storage:restore_room(Host, ServerHost, Room, From) of
 		 {Handler, Opts} ->
 		     ?DEBUG("MUC: Restoring room '~s'~n", [Room]),
 		     R = case mod_muc_room:start(
@@ -518,7 +531,7 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 		        case jlib:iq_query_info(Packet) of 
 				#iq{type = get, xmlns = ?NS_DISCO_INFO = XMLNS,
  				    sub_el = _SubEl, lang = Lang} = IQ ->
- 				    case Storage:restore_room(Host, ServerHost, Room) of
+ 				    case Storage:restore_room(Host, ServerHost, Room, From) of
 		                {RoomHandler, RoomOpts} ->
  				            IQRes = RoomHandler:get_disco_info({not_in_room, From}, Lang, RoomOpts, nil),
  				            Res = IQ#iq{type = result,
@@ -528,7 +541,7 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 							  IQRes}]},
 					          ejabberd_router:route(
 					          To, From, jlib:iq_to_xml(Res));
- 				        E -> 
+ 				        _E -> 
  				            Lang = xml:get_attr_s("xml:lang", Attrs),
 			                ErrText = "Room does not exist",
 			                Err = jlib:make_error_reply(
@@ -544,10 +557,10 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 			        ejabberd_router:route(To, From, Err)
                 end;
 			{"presence", ""} ->
-			    case Storage:restore_room(Host, ServerHost, Room) of
+			    case Storage:restore_room(Host, ServerHost, Room, From) of
 		        {RoomHandler, RoomOpts} ->
 		            ?DEBUG("MUC: Restoring room '~s'~n", [Room]),
-		            {ok, Pid} = mod_muc_room:start(
+		            case mod_muc_room:start(
 				        Host,
 				        ServerHost,
 				        Access,
@@ -556,21 +569,37 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 				        RoomShaper,
 				        RoomOpts,
 				        RoomHandler,
-				        Storage),
-		            register_room(Host, Room, Pid),
-		            mod_muc_room:route(Pid, From, Nick, Packet),
-		            ok;
+				        Storage) of
+				    {ok, Pid} -> 
+		                register_room(Host, Room, Pid),
+		                mod_muc_room:route(Pid, From, Nick, Packet);
+		            {error, _Reason}->
+		                 Lang = xml:get_attr_s("xml:lang", Attrs),
+			             ErrText = "Unable to restore room",
+			             Err = jlib:make_error_reply(
+				            Packet, ?ERRT_INTERNAL_SERVER_ERROR(Lang, ErrText)),
+			             ejabberd_router:route(To, From, Err)
+			        end,
+			        ok;
 		        error ->
 			        case acl:match_rule(ServerHost, AccessCreate, From) of
 				    allow ->
 				        ?DEBUG("MUC: open new room '~s'~n", [Room]),
-				        {ok, Pid} = mod_muc_room:start(
-				    		  Host, ServerHost, Access,
-				    		  Room, HistorySize,
-				    		  RoomShaper, From,
-				    		  Nick, DefRoomOpts, Handler, Storage),
-				        register_room(Host, Room, Pid),
-				        mod_muc_room:route(Pid, From, Nick, Packet),
+				        case mod_muc_room:start(
+				        		  Host, ServerHost, Access,
+				        		  Room, HistorySize,
+				        		  RoomShaper, From,
+				        		  Nick, DefRoomOpts, Handler, Storage) of
+				        {ok, Pid} -> 
+		                    register_room(Host, Room, Pid),
+		                    mod_muc_room:route(Pid, From, Nick, Packet);
+		                {error, _Reason}->
+		                     Lang = xml:get_attr_s("xml:lang", Attrs),
+			                 ErrText = "Unable to restore room",
+			                 Err = jlib:make_error_reply(
+				                Packet, ?ERRT_INTERNAL_SERVER_ERROR(Lang, ErrText)),
+			                 ejabberd_router:route(To, From, Err)
+			            end,
 				        ok;
 				    _ ->
 				        Lang = xml:get_attr_s("xml:lang", Attrs),
@@ -597,7 +626,6 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 
 
 
-
 register_room(Host, Room, Pid) ->
     F = fun() ->
 		mnesia:write(#muc_online_room{name_host = {Room, Host},
@@ -621,7 +649,7 @@ iq_disco_info(Lang) ->
 
 iq_disco_items(Host, ServerHost, From, Lang, none, Storage) ->
     OnlineRooms = get_vh_rooms(Host),
-    PersistentRooms = Storage:fetch_room_names(Host, ServerHost),
+    PersistentRooms = Storage:fetch_room_names(Host, ServerHost, From),
     lists:zf(
         fun(#muc_online_room{name_host = {Name, _Host}, pid = Pid}) ->
 		     case catch gen_fsm:sync_send_all_state_event(
