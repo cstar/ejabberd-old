@@ -1576,8 +1576,8 @@ create_node(Host, ServerHost, Node, Owner, GivenType, Access, Configuration) ->
 		    {result, Result};
 		Error ->
 		    %% in case we change transaction to sync_dirty...
-            node_call(Type, delete_node, [Host, Node]),
-		    tree_call(Host, delete_node, [Host, Node]),
+            %node_call(Type, delete_node, [Host, Node]),
+		    %tree_call(Host, delete_node, [Host, Node]),
 		    Error
 	    end;
 	Error ->

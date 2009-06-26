@@ -665,7 +665,8 @@ get_entity_subscriptions(Host, Owner) ->
 	    [{nodetree, NT}] -> NT;
 	    _ -> nodetree_default
 	end,
-	Reply = lists:foldl(fun(#pubsub_state{stateid = {J, N}, subscriptions = Ss}, Acc) ->
+	Reply = lists:foldl(fun(Record, Acc) ->
+	#pubsub_state{stateid = {J, N}, subscriptions = Ss} = sdb_to_record(Record),
 	case NodeTree:get_node(N) of
 	    #pubsub_node{nodeid = {Host, _}} = Node ->
 			lists:foldl(fun({subscribed, SubID}, Acc2) ->
@@ -792,11 +793,7 @@ set_state(#pubsub_state{stateid = StateId,
     SdbSubs = lists:map(fun(S)->
         {"subscription", a2l(S)}
     end, Subs),
-    ?DEBUG("erlsdb:replace_attributes(~p, ~p, ~p).",[ ?DOMAIN, Key, [{"host", SHost}, 
-                                      {"node", SNode},
-                                      {"jid", SJID},
-                                      {"affiliation", a2l(Aff)},
-                                      {"subscription", a2l(Subs)}]]),
+
     erlsdb:replace_attributes(?DOMAIN, Key, [{"host", SHost}, 
                                          {"node", SNode},
                                          {"jid", SJID},
@@ -978,7 +975,8 @@ can_fetch_item(_Affiliation, _Subscription) -> false.
 %	[#pubsub_node{nodeid = {_, Node}}] -> Node;
 %	_ -> []
 %    end.
-    
+
+a2l([])->[];    
 a2l(Atom) when is_atom(Atom)->atom_to_list(Atom).
 l2a("member")->member;
 l2a("owner")->owner;
