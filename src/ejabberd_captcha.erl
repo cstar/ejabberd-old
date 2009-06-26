@@ -1,10 +1,29 @@
 %%%-------------------------------------------------------------------
 %%% File    : ejabberd_captcha.erl
 %%% Author  : Evgeniy Khramtsov <xramtsov@gmail.com>
-%%% Description : CAPTCHA processing.
-%%%
+%%% Purpose : CAPTCHA processing.
 %%% Created : 26 Apr 2008 by Evgeniy Khramtsov <xramtsov@gmail.com>
+%%%
+%%%
+%%% ejabberd, Copyright (C) 2002-2009   ProcessOne
+%%%
+%%% This program is free software; you can redistribute it and/or
+%%% modify it under the terms of the GNU General Public License as
+%%% published by the Free Software Foundation; either version 2 of the
+%%% License, or (at your option) any later version.
+%%%
+%%% This program is distributed in the hope that it will be useful,
+%%% but WITHOUT ANY WARRANTY; without even the implied warranty of
+%%% MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+%%% General Public License for more details.
+%%%
+%%% You should have received a copy of the GNU General Public License
+%%% along with this program; if not, write to the Free Software
+%%% Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
+%%% 02111-1307 USA
+%%%
 %%%-------------------------------------------------------------------
+
 -module(ejabberd_captcha).
 
 -behaviour(gen_server).
@@ -153,22 +172,26 @@ process_reply({xmlelement, "captcha", _, _} = El) ->
 	    {error, malformed};
 	Xdata ->
 	    Fields = jlib:parse_xdata_submit(Xdata),
-	    [Id | _] = proplists:get_value("challenge", Fields, [none]),
-	    [OCR | _] = proplists:get_value("ocr", Fields, [none]),
-	    ?T(case mnesia:read(captcha, Id, write) of
-		   [#captcha{pid=Pid, args=Args, key=Key, tref=Tref}] ->
-		       mnesia:delete({captcha, Id}),
-		       erlang:cancel_timer(Tref),
-		       if OCR == Key ->
-			       Pid ! {captcha_succeed, Args},
-			       ok;
-			  true ->
-			       Pid ! {captcha_failed, Args},
-			       {error, bad_match}
-		       end;
-		   _ ->
-		       {error, not_found}
-	       end)
+	    case {proplists:get_value("challenge", Fields),
+		  proplists:get_value("ocr", Fields)} of
+		{[Id|_], [OCR|_]} ->
+		    ?T(case mnesia:read(captcha, Id, write) of
+			   [#captcha{pid=Pid, args=Args, key=Key, tref=Tref}] ->
+			       mnesia:delete({captcha, Id}),
+			       erlang:cancel_timer(Tref),
+			       if OCR == Key ->
+				       Pid ! {captcha_succeed, Args},
+				       ok;
+				  true ->
+				       Pid ! {captcha_failed, Args},
+				       {error, bad_match}
+			       end;
+			   _ ->
+			       {error, not_found}
+		       end);
+		_ ->
+		    {error, malformed}
+	    end
     end;
 process_reply(_) ->
     {error, malformed}.

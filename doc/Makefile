@@ -3,12 +3,9 @@
 SHELL = /bin/bash
 
 CONTRIBUTED_MODULES = ""
-ifeq ($(shell ls mod_http_bind.tex),mod_http_bind.tex)
-	CONTRIBUTED_MODULES += "\\n\\setboolean{modhttpbind}{true}"
-endif
-ifeq ($(shell ls mod_http_fileserver.tex),mod_http_fileserver.tex)
-	CONTRIBUTED_MODULES += "\\n\\setboolean{modhttpfileserver}{true}"
-endif
+#ifeq ($(shell ls mod_http_bind.tex),mod_http_bind.tex)
+#	CONTRIBUTED_MODULES += "\\n\\setboolean{modhttpbind}{true}"
+#endif
 
 
 all:	release pdf html

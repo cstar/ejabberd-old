@@ -36,6 +36,8 @@
 -module(nodetree_tree).
 -author('christophe.romain@process-one.net').
 
+-include_lib("stdlib/include/qlc.hrl").
+
 -include("pubsub.hrl").
 -include("jlib.hrl").
 -include("ejabberd.hrl").
@@ -50,6 +52,8 @@
 	 get_node/1,
 	 get_nodes/2,
 	 get_nodes/1,
+	 get_parentnodes/3,
+	 get_parentnodes_tree/3,
 	 get_subnodes/3,
 	 get_subnodes_tree/3,
 	 create_node/5,
@@ -161,11 +165,38 @@ get_nodes(Key) ->
     Nodes =  s3:get_objects(get_bucket(Key), [{prefix, K}]),
     lists:map(fun({_K, Bin, _H})-> binary_to_term(list_to_binary(Bin)) end, Nodes).
 
+%% @spec (Host, Node, From) -> [{Depth, Record}] | {error, Reason}
+%%     Host   = mod_pubsub:host() | mod_pubsub:jid()
+%%     Node   = mod_pubsub:pubsubNode()
+%%     From   = mod_pubsub:jid()
+%%     Depth  = integer()
+%%     Record = pubsubNode()
+%% @doc <p>Default node tree does not handle parents, return empty list.</p>
+get_parentnodes(_Host, _Node, _From) ->
+    [].
+
+%% @spec (Host, Node, From) -> [{Depth, Record}] | {error, Reason}
+%%     Host   = mod_pubsub:host() | mod_pubsub:jid()
+%%     Node   = mod_pubsub:pubsubNode()
+%%     From   = mod_pubsub:jid()
+%%     Depth  = integer()
+%%     Record = pubsubNode()
+%% @doc <p>Default node tree does not handle parents, return a list
+%% containing just this node.</p>
+get_parentnodes_tree(Host, Node, From) ->
+    case get_node(Host, Node, From) of
+	N when is_record(N, pubsub_node) ->
+	    [{0, mnesia:read(pubsub_node, {Host, Node})}];
+	Error ->
+	    Error
+    end.
+
 %% @spec (Host, Node, From) -> [pubsubNode()] | {error, Reason}
 %%     Host = mod_pubsub:host()
 %%     Node = mod_pubsub:pubsubNode()
 %%     From = mod_pubsub:jid()
 get_subnodes(Host, Node, _From) ->
+<<<<<<< HEAD:src/mod_pubsub/nodetree_tree.erl
     Key=make_key({Host, Node}),
     K = case lists:reverse(Key) of
         [$/|_R] -> Key;
@@ -173,6 +204,15 @@ get_subnodes(Host, Node, _From) ->
     end,
     Nodes = s3:get_objects(get_bucket(Host), [{prefix, K}, {delimiter, "/"}]),
     lists:map(fun({_K, Bin, _H})-> binary_to_term(list_to_binary(Bin)) end, Nodes).
+=======
+    get_subnodes(Host, Node).
+get_subnodes(Host, Node) ->
+    Q = qlc:q([N || #pubsub_node{nodeid = {NHost, _},
+				 parents = Parents} = N <- mnesia:table(pubsub_node),
+		       Host == NHost,
+		       lists:member(Node, Parents)]),
+    qlc:e(Q).
+>>>>>>> a12de2eaecaa782ee37f96f3a6340068af975af8:src/mod_pubsub/nodetree_tree.erl
 
 %% @spec (Host, Index) -> [pubsubNode()] | {error, Reason}
 %%     Host = mod_pubsub:host()
@@ -220,12 +260,19 @@ create_node(Key, Node, Type, Owner, Options) ->
 		end,
 	    case ParentExists of
 		true ->
+<<<<<<< HEAD:src/mod_pubsub/nodetree_tree.erl
 		    %% Service requires registration
 		    %%{error, ?ERR_REGISTRATION_REQUIRED};
 		    %NodeId = pubsub_index:new(node),
 		    set_node(#pubsub_node{nodeid = {Key, Node},
 					      parent = {Key, ParentNode},
 					      id = {Key, Node},
+=======
+		    NodeId = pubsub_index:new(node),
+		    mnesia:write(#pubsub_node{nodeid = {Host, Node},
+					      id = NodeId,
+					      parents = [ParentNode],
+>>>>>>> a12de2eaecaa782ee37f96f3a6340068af975af8:src/mod_pubsub/nodetree_tree.erl
 					      type = Type,
 					      owners = [OwnerKey],
 					      options = Options}),

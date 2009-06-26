@@ -76,8 +76,7 @@ terminate(Host, ServerHost) ->
     ok.
 
 options() ->
-    [{node_type, pep},
-     {deliver_payloads, true},
+    [{deliver_payloads, true},
      {notify_config, false},
      {notify_delete, false},
      {notify_retract, false},
@@ -174,7 +173,7 @@ get_entity_affiliations(_Host, Owner) ->
     States = mnesia:match_object(#pubsub_state{stateid = {GenKey, '_'}, _ = '_'}),
     NodeTree = case ets:lookup(gen_mod:get_module_proc(D, config), nodetree) of
 	    [{nodetree, N}] -> N;
-	    _ -> nodetree_default
+	    _ -> nodetree_tree
 	end,
     Reply = lists:foldl(fun(#pubsub_state{stateid = {_, N}, affiliation = A}, Acc) ->
 	case NodeTree:get_node(N) of
@@ -192,7 +191,6 @@ get_affiliation(NodeId, Owner) ->
 
 set_affiliation(NodeId, Owner, Affiliation) ->
     node_hometree:set_affiliation(NodeId, Owner, Affiliation).
-
 get_entity_subscriptions(Host, Owner) ->
     node_default:get_entity_subscriptions(Host, Owner).
     %{U, D, _} = SubKey = jlib:jid_tolower(Owner),
@@ -205,19 +203,24 @@ get_entity_subscriptions(Host, Owner) ->
 	%    ++ mnesia:match_object(
 	%       #pubsub_state{stateid = {SubKey, '_'}, _ = '_'})
     %end,
-    %Reply = lists:foldl(fun(#pubsub_state{stateid = {J, N}, subscription = S}, Acc) ->
-	%case mnesia:index_read(pubsub_node, N, #pubsub_node.id) of
-	%    [#pubsub_node{nodeid = {H, _}} = Node] ->
-	%	case H of
-	%	    {_, D, _} -> [{Node, S, J}|Acc];
-	%	    _ -> Acc
-	%	end;
-	%    _ ->
-	%	Acc
+    %NodeTree = case ets:lookup(gen_mod:get_module_proc(D, config), nodetree) of
+	%    [{nodetree, N}] -> N;
+	%    _ -> nodetree_tree
+	%end,
+    %Reply = lists:foldl(fun(#pubsub_state{stateid = {J, N}, subscriptions = Ss}, Acc) ->
+	%case NodeTree:get_node(N) of
+	%    #pubsub_node{nodeid = {{_, D, _}, _}} = Node ->
+	%		lists:foldl(fun({subscribed, SubID}, Acc2) ->
+	%				   [{Node, subscribed, SubID, J} | Acc2];
+	%				({pending, _SubID}, Acc2) ->
+	%				    [{Node, pending, J} | Acc2];
+	%				(S, Acc2) ->
+	%				    [{Node, S, J} | Acc2]
+	%			    end, Acc, Ss);
+	%    _ -> Acc
 	%end
     %end, [], States),
     %{result, Reply}.
-
 
 get_node_subscriptions(NodeId) ->
     %% note: get_node_subscriptions is used for broadcasting

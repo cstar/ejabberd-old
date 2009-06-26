@@ -150,7 +150,12 @@
   %%			   ]},
 
   {5280, ejabberd_http, [
+			 %%{request_handlers,
+			 %% [
+			 %%  {["pub", "archive"], mod_http_fileserver},
+			 %% ]},
 			 captcha,
+			 http_bind,
 			 http_poll,
 			 web_admin
 			]}
@@ -379,6 +384,9 @@
 %% Maximum number of simultaneous sessions allowed for a single user:
 {access, max_user_sessions, [{10, all}]}.
 
+%% Maximum number of offline messages that users can have:
+{access, max_user_offline_messages, [{5000, admin}, {100, all}]}. 
+
 %% This rule allows access only for local users:
 {access, local, [{allow, local}]}.
 
@@ -473,6 +481,11 @@
   %%{mod_echo,   [{host, "echo.localhost"}]},
   {mod_irc,      []},
   {mod_last_sdb,     []},
+  {mod_http_bind, []},
+  %%{mod_http_fileserver, [
+  %%                       {docroot, "/var/www"}, 
+  %%                       {accesslog, "/var/log/ejabberd/access.log"}
+  %%                      ]},
   {mod_muc,      [
 		  %%{host, "conference.@HOST@"},
 		  {storage, s3_muc_storage},{s3_bucket, "muc.localhost"},
@@ -482,7 +495,7 @@
 		  {access_admin, muc_admin}
 		 ]},
   %%{mod_muc_log,[]},
-  {mod_offline,  []},
+  {mod_offline,  [{access_max_user_messages, max_user_offline_messages}]},
   {mod_privacy,  []},
   {mod_private,  []},
   %%{mod_proxy65,[]},

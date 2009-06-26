@@ -895,6 +895,11 @@ session_established({xmlstreamend, _Name}, StateData) ->
     send_text(StateData, ?STREAM_TRAILER),
     {stop, normal, StateData};
 
+session_established({xmlstreamerror, "XML stanza is too big" = E}, StateData) ->
+    Text = ?POLICY_VIOLATION_ERR(StateData#state.lang, E) ++ ?STREAM_TRAILER,
+    send_text(StateData, Text),
+    {stop, normal, StateData};
+
 session_established({xmlstreamerror, _}, StateData) ->
     send_text(StateData, ?INVALID_XML_ERR ++ ?STREAM_TRAILER),
     {stop, normal, StateData};
@@ -1258,7 +1263,12 @@ handle_info({route, From, To, Packet}, StateName, StateData) ->
 	end,
     if
 	Pass == exit ->
-	    catch send_text(StateData, ?STREAM_TRAILER),
+	    %% When Pass==exit, NewState contains a string instead of a #state{}
+	    Lang = StateData#state.lang,
+            catch send_text(StateData,
+			    xml:element_to_string(
+			      ?SERRT_CONFLICT(Lang, NewState))
+			    ++ ?STREAM_TRAILER),
 	    {stop, normal, StateData};
 	Pass ->
 	    Attrs2 = jlib:replace_from_to_attrs(jlib:jid_to_string(From),
@@ -2005,6 +2015,8 @@ fsm_reply(Reply, StateName, StateData) ->
     {reply, Reply, StateName, StateData, ?C2S_OPEN_TIMEOUT}.
 
 %% Used by c2s blacklist plugins
+is_ip_blacklisted(undefined) ->
+    false;
 is_ip_blacklisted({IP,_Port}) ->
     ejabberd_hooks:run_fold(check_bl_c2s, false, [IP]).
 
