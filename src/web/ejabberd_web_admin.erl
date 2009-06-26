@@ -47,8 +47,6 @@
 	     {"name", Name},
 	     {"value", Value}])).
 
-<<<<<<< HEAD:src/web/ejabberd_web_admin.erl
-=======
 %%%==================================
 %%%% get_acl_access
 
@@ -140,7 +138,6 @@ url_to_path(URL) ->
   
 %%%==================================
 %%%% process/2
->>>>>>> a12de2eaecaa782ee37f96f3a6340068af975af8:src/web/ejabberd_web_admin.erl
 
 process(["doc", LocalFile], _Request) ->
     DocPath = case os:getenv("EJABBERD_DOC_PATH") of
@@ -310,12 +307,9 @@ get_base_path(Host, cluster) -> "/admin/server/" ++ Host ++ "/";
 get_base_path(global, Node) -> "/admin/node/" ++ atom_to_list(Node) ++ "/";
 get_base_path(Host, Node) -> "/admin/server/" ++ Host ++ "/node/" ++ atom_to_list(Node) ++ "/".
 
-<<<<<<< HEAD:src/web/ejabberd_web_admin.erl
-=======
 %%%==================================
 %%%% css & images
 
->>>>>>> a12de2eaecaa782ee37f96f3a6340068af975af8:src/web/ejabberd_web_admin.erl
 additions_js() ->
 "
 function selectAll() {

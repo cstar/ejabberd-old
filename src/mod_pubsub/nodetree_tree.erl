@@ -196,7 +196,6 @@ get_parentnodes_tree(Host, Node, From) ->
 %%     Node = mod_pubsub:pubsubNode()
 %%     From = mod_pubsub:jid()
 get_subnodes(Host, Node, _From) ->
-<<<<<<< HEAD:src/mod_pubsub/nodetree_tree.erl
     Key=make_key({Host, Node}),
     K = case lists:reverse(Key) of
         [$/|_R] -> Key;
@@ -204,15 +203,7 @@ get_subnodes(Host, Node, _From) ->
     end,
     Nodes = s3:get_objects(get_bucket(Host), [{prefix, K}, {delimiter, "/"}]),
     lists:map(fun({_K, Bin, _H})-> binary_to_term(list_to_binary(Bin)) end, Nodes).
-=======
-    get_subnodes(Host, Node).
-get_subnodes(Host, Node) ->
-    Q = qlc:q([N || #pubsub_node{nodeid = {NHost, _},
-				 parents = Parents} = N <- mnesia:table(pubsub_node),
-		       Host == NHost,
-		       lists:member(Node, Parents)]),
-    qlc:e(Q).
->>>>>>> a12de2eaecaa782ee37f96f3a6340068af975af8:src/mod_pubsub/nodetree_tree.erl
+
 
 %% @spec (Host, Index) -> [pubsubNode()] | {error, Reason}
 %%     Host = mod_pubsub:host()
@@ -260,19 +251,12 @@ create_node(Key, Node, Type, Owner, Options) ->
 		end,
 	    case ParentExists of
 		true ->
-<<<<<<< HEAD:src/mod_pubsub/nodetree_tree.erl
 		    %% Service requires registration
 		    %%{error, ?ERR_REGISTRATION_REQUIRED};
 		    %NodeId = pubsub_index:new(node),
 		    set_node(#pubsub_node{nodeid = {Key, Node},
-					      parent = {Key, ParentNode},
-					      id = {Key, Node},
-=======
-		    NodeId = pubsub_index:new(node),
-		    mnesia:write(#pubsub_node{nodeid = {Host, Node},
-					      id = NodeId,
 					      parents = [ParentNode],
->>>>>>> a12de2eaecaa782ee37f96f3a6340068af975af8:src/mod_pubsub/nodetree_tree.erl
+					      id = {Key, Node},
 					      type = Type,
 					      owners = [OwnerKey],
 					      options = Options}),

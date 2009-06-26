@@ -2774,7 +2774,6 @@ broadcast_removed_node(Host, Node, NodeId, Type, NodeOptions, SubsByDepth) ->
 		[] -> 
 		    {result, false};
 		_ ->
-		    SubOptions = get_options_for_subs(Host, Node, NodeId, Subs),
 		    Stanza = event_stanza(
 			[{xmlelement, "delete", nodeAttr(Node),
 			    []}]),
