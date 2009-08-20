@@ -703,11 +703,12 @@ handle_info(Info, StateName, StateData) ->
 %% Purpose: Shutdown the fsm
 %% Returns: any
 %%----------------------------------------------------------------------
-terminate(_Reason, _StateName, StateData) ->
+terminate(Reason, _StateName, StateData) ->
     ?DICT:fold(
        fun(J, _, _) ->
 	       tab_remove_online_user(J, StateData)
        end, [], StateData#state.users),
+    handler_call(room_destroyed, [Reason], StateData),
     mod_muc:room_destroyed(StateData#state.host, StateData#state.room, self(),
 			   StateData#state.server_host),
     ok.
@@ -922,6 +923,7 @@ process_presence(From, Nick, {xmlelement, "presence", Attrs, _Els} = Packet,
 				false -> "";
 				Status_el -> xml:get_tag_cdata(Status_el)
 			end,
+			handler_call(user_leaving, [From, Nick, Reason], NewState),
 			remove_online_user(From, NewState, Reason);
 		    _ ->
 			StateData

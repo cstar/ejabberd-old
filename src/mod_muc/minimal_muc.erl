@@ -14,6 +14,8 @@
          init/2,
          init/4]).
 -export([
+         user_leaving/4,
+         room_destroyed/2,
          process_changed_ra/5,
          can_join/7,
          can_change_ra/8,
@@ -166,6 +168,12 @@ can_get_affiliations(UserInfo, FAffiliation, Headers)-> false.
 can_join(From, Nick, Affiliation, ServiceAffiliation, Lang, Packet, Headers)-> {true, admin}.
 can_invite(From, FAffiliation,JID, InviteEl, Lang,Headers)->{false, [], Headers}.
 
+% @spec (From::jid(), Nick::string(), Reason::string(), Headers::headers())->
+%   ok
+% @doc Hook called when user disconnects. Return value not used.
+user_leaving(From, Nick, Reason, Headers)->
+    ok.
+
 %% @spec (UserInfo::user(), Headers::headers())-> true|false
 %% @doc Can the user see the real JID ?
 can_get_full_jids(User,Headers)-> false.
@@ -188,14 +196,15 @@ can_change_ra(FAffiliation, FRole,
 	      TAffiliation, TRole,
 	      Type, Value, ServiceAf, Headers)-> false.
 
-
-% Back to atom
-%% @spec (StrAff::string, Headers::headers)->atom()
+%% @spec (StrAff::string(), Headers::headers)->atom()
 %% @doc Convert string Affiliation (from a stanza) to its atom form (for management).
 list_to_affiliation(StrAff,Headers)-> list_to_atom(StrAff).
-%% @spec (StrRole::string, Headers::headers)->atom()
+%% @spec (StrRole::string(), Headers::headers)->atom()
 %% @doc Convert string Role (from a stanza) to its atom form (for management).
 list_to_role(StrRole,Headers)-> list_to_atom(StrRole).
 
-
+%% @spec (Reason::atom(), Headers::headers)->atom()
+%% @doc Convert string Affiliation (from a stanza) to its atom form (for management).
+room_destroyed(Reason, Headers)->
+    ok.
 

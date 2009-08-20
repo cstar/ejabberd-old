@@ -15,6 +15,7 @@ behaviour_info(callbacks) ->
          {init,4},
          {process_changed_ra,5},
          {can_join,7},
+         {user_leaving, 4},
          {can_change_ra,8},
          {can_invite,6},
          {is_persistent,1},
