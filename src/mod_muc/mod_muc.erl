@@ -421,10 +421,14 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 			    case jlib:iq_query_info(Packet) of
 				#iq{type = get, xmlns = ?NS_DISCO_INFO = XMLNS,
  				    sub_el = _SubEl, lang = Lang} = IQ ->
+				    Info = ejabberd_hooks:run_fold(
+					     disco_info, ServerHost, [],
+					     [ServerHost, ?MODULE, "", ""]),
 				    Res = IQ#iq{type = result,
 						sub_el = [{xmlelement, "query",
 							   [{"xmlns", XMLNS}],
-							   iq_disco_info(Lang)}]},
+							   iq_disco_info(Lang)
+							   ++Info}]},
 				    ejabberd_router:route(To,
 							  From,
 							  jlib:iq_to_xml(Res));
@@ -844,11 +848,11 @@ process_iq_register_set(Host, From, SubEl, Lang) ->
 				    {error, ?ERR_BAD_REQUEST};
 				_ ->
 				    case lists:keysearch("nick", 1, XData) of
-					false ->
+					{value, {_, [Nick]}} when Nick /= "" ->
+					    iq_set_register_info(Host, From, Nick, Lang);
+					_ ->
 					    ErrText = "You must fill in field \"Nickname\" in the form",
-					    {error, ?ERRT_NOT_ACCEPTABLE(Lang, ErrText)};
-					{value, {_, [Nick]}} ->
-					    iq_set_register_info(Host, From, Nick, Lang)
+					    {error, ?ERRT_NOT_ACCEPTABLE(Lang, ErrText)}
 				    end
 			    end;
 			_ ->

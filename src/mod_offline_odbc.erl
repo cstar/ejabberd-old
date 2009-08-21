@@ -36,6 +36,7 @@
 	 stop/1,
 	 store_packet/3,
 	 pop_offline_messages/3,
+	 get_sm_features/5,
 	 remove_user/2,
 	 webadmin_page/3,
 	 webadmin_user/4,
@@ -63,6 +64,10 @@ start(Host, Opts) ->
 		       ?MODULE, remove_user, 50),
     ejabberd_hooks:add(anonymous_purge_hook, Host,
 		       ?MODULE, remove_user, 50),
+    ejabberd_hooks:add(disco_sm_features, Host,
+		       ?MODULE, get_sm_features, 50),
+    ejabberd_hooks:add(disco_local_features, Host,
+		       ?MODULE, get_sm_features, 50),
     ejabberd_hooks:add(webadmin_page_host, Host,
 		       ?MODULE, webadmin_page, 50),
     ejabberd_hooks:add(webadmin_user, Host,
@@ -107,6 +112,13 @@ loop(Host, AccessMaxOfflineMsgs) ->
 						Els ++
 						[jlib:timestamp_to_xml(
 						   calendar:now_to_universal_time(
+					     M#offline_msg.timestamp),
+					   utc,
+					   jlib:make_jid("", Host, ""),
+					   "Offline Storage"),
+					 %% TODO: Delete the next three lines once XEP-0091 is Obsolete
+					 jlib:timestamp_to_xml( 
+					   calendar:now_to_universal_time(
 						     M#offline_msg.timestamp))]},
 				      XML =
 					  ejabberd_odbc:escape(
@@ -155,6 +167,8 @@ stop(Host) ->
 			  ?MODULE, remove_user, 50),
     ejabberd_hooks:delete(anonymous_purge_hook, Host,
 			  ?MODULE, remove_user, 50),
+    ejabberd_hooks:delete(disco_sm_features, Host, ?MODULE, get_sm_features, 50),
+    ejabberd_hooks:delete(disco_local_features, Host, ?MODULE, get_sm_features, 50),
     ejabberd_hooks:delete(webadmin_page_host, Host,
 			  ?MODULE, webadmin_page, 50),
     ejabberd_hooks:delete(webadmin_user, Host,
@@ -165,12 +179,27 @@ stop(Host) ->
     exit(whereis(Proc), stop),
     ok.
 
+get_sm_features(Acc, _From, _To, "", _Lang) ->
+    Feats = case Acc of
+		{result, I} -> I;
+		_ -> []
+	    end,
+    {result, Feats ++ [?NS_FEATURE_MSGOFFLINE]};
+
+get_sm_features(_Acc, _From, _To, ?NS_FEATURE_MSGOFFLINE, _Lang) ->
+    %% override all lesser features...
+    {result, []};
+
+get_sm_features(Acc, _From, _To, _Node, _Lang) ->
+    Acc.
+
+
 store_packet(From, To, Packet) ->
     Type = xml:get_tag_attr_s("type", Packet),
     if
 	(Type /= "error") and (Type /= "groupchat") and
 	(Type /= "headline") ->
-	    case check_event(From, To, Packet) of
+	    case check_event_chatstates(From, To, Packet) of
 		true ->
 		    #jid{luser = LUser} = To,
 		    TimeStamp = now(),
@@ -191,12 +220,22 @@ store_packet(From, To, Packet) ->
 	    ok
     end.
 
-check_event(From, To, Packet) ->
+%% Check if the packet has any content about XEP-0022 or XEP-0085
+check_event_chatstates(From, To, Packet) ->
     {xmlelement, Name, Attrs, Els} = Packet,
-    case find_x_event(Els) of
-	false ->
+    case find_x_event_chatstates(Els, {false, false, false}) of
+	%% There wasn't any x:event or chatstates subelements
+	{false, false, _} ->
 	    true;
-	El ->
+	%% There a chatstates subelement and other stuff, but no x:event
+	{false, CEl, true} when CEl /= false ->
+	    true;
+	%% There was only a subelement: a chatstates
+	{false, CEl, false} when CEl /= false ->
+	    %% Don't allow offline storage
+	    false;
+	%% There was an x:event element, and maybe also other stuff
+	{El, _, _} when El /= false ->
 	    case xml:get_subtag(El, "id") of
 		false ->
 		    case xml:get_subtag(El, "offline") of
@@ -218,22 +257,25 @@ check_event(From, To, Packet) ->
 					    {xmlelement, "offline", [], []}]}]
 					}),
 			    true
-			end;
+		    end;
 		_ ->
 		    false
 	    end
     end.
 
-find_x_event([]) ->
-    false;
-find_x_event([{xmlcdata, _} | Els]) ->
-    find_x_event(Els);
-find_x_event([El | Els]) ->
+%% Check if the packet has subelements about XEP-0022, XEP-0085 or other
+find_x_event_chatstates([], Res) ->
+    Res;
+find_x_event_chatstates([{xmlcdata, _} | Els], Res) ->
+    find_x_event_chatstates(Els, Res);
+find_x_event_chatstates([El | Els], {A, B, C}) ->
     case xml:get_tag_attr_s("xmlns", El) of
 	?NS_EVENT ->
-	    El;
+	    find_x_event_chatstates(Els, {El, B, C});
+	?NS_CHATSTATES ->
+	    find_x_event_chatstates(Els, {A, El, C});
 	_ ->
-	    find_x_event(Els)
+	    find_x_event_chatstates(Els, {A, B, true})
     end.
 
 find_x_expire(_, []) ->

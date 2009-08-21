@@ -107,6 +107,7 @@ set_node(#pubsub_node{nodeid = NodeId}=N)->
     
 set_node(_) ->
     {error, ?ERR_INTERNAL_SERVER_ERROR}.
+
 make_key({{_U, _S, _R}=JID, []})->
     SHost = jlib:jid_to_string(JID),
     ?PREFIX++SHost ++ ":";
@@ -138,6 +139,7 @@ get_bucket(Host)->
     
 get_node(Host, Node, _From) ->
     get_node(Host, Node).
+
 %% @spec (Host, Node) -> pubsubNode() | {error, Reason}
 %%     Host = mod_pubsub:host()
 %%     Node = mod_pubsub:pubsubNode()
@@ -157,13 +159,14 @@ get_node({Host, Node}) ->
 get_nodes(Key, _From) ->
     get_nodes(Key).
 
-%% @spec (Key) -> [pubsubNode()] | {error, Reason}
+
+%% @spec (Host) -> [pubsubNode()] | {error, Reason}
 %%     Key = mod_pubsub:host() | mod_pubsub:jid()
-get_nodes(Key) ->
-    K=make_key({Key, []}),
-    ?DEBUG("Key : ~s", [K]),
-    Nodes =  s3:get_objects(get_bucket(Key), [{prefix, K}]),
+get_nodes(Host) ->
+    K=make_key({Host, []}),
+    Nodes =  s3:get_objects(get_bucket(Host), [{prefix, K}]),
     lists:map(fun({_K, Bin, _H})-> binary_to_term(list_to_binary(Bin)) end, Nodes).
+
 
 %% @spec (Host, Node, From) -> [{Depth, Record}] | {error, Reason}
 %%     Host   = mod_pubsub:host() | mod_pubsub:jid()
@@ -185,10 +188,8 @@ get_parentnodes(_Host, _Node, _From) ->
 %% containing just this node.</p>
 get_parentnodes_tree(Host, Node, From) ->
     case get_node(Host, Node, From) of
-	N when is_record(N, pubsub_node) ->
-	    [{0, mnesia:read(pubsub_node, {Host, Node})}];
-	Error ->
-	    Error
+	N when is_record(N, pubsub_node) -> [{0, [N]}];
+	Error -> Error
     end.
 
 %% @spec (Host, Node, From) -> [pubsubNode()] | {error, Reason}
@@ -228,7 +229,7 @@ get_subnodes_tree(Host, Node)->
 %%     Owner = mod_pubsub:jid()
 %%     Options = list()
 create_node(Key, Node, Type, Owner, Options) ->
-    OwnerKey = jlib:jid_tolower(jlib:jid_remove_resource(Owner)),
+    BJID = jlib:jid_tolower(jlib:jid_remove_resource(Owner)),
     case get_node(Key, Node) of
 	{error, ?ERR_ITEM_NOT_FOUND} ->
 	    {ParentNode, ParentExists} =
@@ -238,8 +239,7 @@ create_node(Key, Node, Type, Owner, Options) ->
 			%% PEP does not uses hierarchy
 			{[], true};
 		    _ ->
-			Parent = lists:sublist(Node, length(Node) - 1),
-			case Parent of
+			case lists:sublist(Node, length(Node) - 1) of
 			[] -> 
 			    {[], true};
 			_ ->

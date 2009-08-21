@@ -27,16 +27,20 @@
 -define(NS_REGISTER,     "jabber:iq:register").
 -define(NS_SEARCH,       "jabber:iq:search").
 -define(NS_ROSTER,       "jabber:iq:roster").
+-define(NS_ROSTER_VER,   "urn:xmpp:features:rosterver").
 -define(NS_PRIVACY,      "jabber:iq:privacy").
 -define(NS_PRIVATE,      "jabber:iq:private").
 -define(NS_VERSION,      "jabber:iq:version").
--define(NS_TIME,         "jabber:iq:time").
+-define(NS_TIME90,       "jabber:iq:time"). % TODO: Remove once XEP-0090 is Obsolete
+-define(NS_TIME,         "urn:xmpp:time").
 -define(NS_LAST,         "jabber:iq:last").
 -define(NS_XDATA,        "jabber:x:data").
 -define(NS_IQDATA,       "jabber:iq:data").
--define(NS_DELAY,        "jabber:x:delay").
+-define(NS_DELAY91,      "jabber:x:delay"). % TODO: Remove once XEP-0091 is Obsolete
+-define(NS_DELAY,        "urn:xmpp:delay").
 -define(NS_EXPIRE,       "jabber:x:expire").
 -define(NS_EVENT,        "jabber:x:event").
+-define(NS_CHATSTATES,   "http://jabber.org/protocol/chatstates").
 -define(NS_XCONFERENCE,  "jabber:x:conference").
 -define(NS_STATS,        "http://jabber.org/protocol/stats").
 -define(NS_MUC,          "http://jabber.org/protocol/muc").
@@ -51,9 +55,11 @@
 -define(NS_PUBSUB_NODE_CONFIG, "http://jabber.org/protocol/pubsub#node_config").
 -define(NS_PUBSUB_SUB_OPTIONS, "http://jabber.org/protocol/pubsub#subscribe_options").
 -define(NS_PUBSUB_SUB_AUTH, "http://jabber.org/protocol/pubsub#subscribe_authorization").
+-define(NS_PUBSUB_GET_PENDING, "http://jabber.org/protocol/pubsub#get-pending").
 -define(NS_COMMANDS,     "http://jabber.org/protocol/commands").
 -define(NS_BYTESTREAMS,  "http://jabber.org/protocol/bytestreams").
 -define(NS_ADMIN,        "http://jabber.org/protocol/admin").
+-define(NS_SERVERINFO,   "http://jabber.org/network/serverinfo").
 
 -define(NS_RSM,          "http://jabber.org/protocol/rsm").
 -define(NS_EJABBERD_CONFIG, "ejabberd:config").
@@ -71,6 +77,7 @@
 -define(NS_FEATURE_IQAUTH, "http://jabber.org/features/iq-auth").
 -define(NS_FEATURE_IQREGISTER, "http://jabber.org/features/iq-register").
 -define(NS_FEATURE_COMPRESS, "http://jabber.org/features/compress").
+-define(NS_FEATURE_MSGOFFLINE, "msgoffline").
 
 -define(NS_COMPRESS,     "http://jabber.org/protocol/compress").
 

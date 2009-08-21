@@ -33,15 +33,15 @@
 	 %% Accounts
 	 register/3, unregister/2,
 	 registered_users/1,
-	 %% Migration
+	 %% Migration jabberd1.4
 	 import_file/1, import_dir/1,
 	 %% Purge DB
 	 delete_expired_messages/0, delete_old_messages/1,
 	 %% Mnesia
 	 backup_mnesia/1, restore_mnesia/1,
-	 dump_mnesia/1, load_mnesia/1,
+	 dump_mnesia/1, dump_table/2, load_mnesia/1,
 	 install_fallback_mnesia/1,
-	 dump_to_textfile/1,
+	 dump_to_textfile/1, dump_to_textfile/2,
 	 mnesia_change_nodename/4,
 	 restore/1 % Still used by some modules
 	]).
@@ -79,6 +79,14 @@ commands() ->
 			desc = "Reopen the log files",
 			module = ?MODULE, function = reopen_log,
 			args = [], result = {res, rescode}},
+     #ejabberd_commands{name = get_loglevel, tags = [logs, server],
+			desc = "Get the current loglevel",
+			module = ejabberd_loglevel, function = get,
+			args = [],
+                        result = {leveltuple, {tuple, [{levelnumber, integer},
+                                                       {levelatom, atom},
+                                                       {leveldesc, string}
+                                                      ]}}},
 
      #ejabberd_commands{name = register, tags = [accounts],
 			desc = "Register a user",
@@ -101,10 +109,23 @@ commands() ->
 			module = ?MODULE, function = import_file,
 			args = [{file, string}], result = {res, restuple}},
      #ejabberd_commands{name = import_dir, tags = [mnesia],
-			desc = "Import user data from jabberd14 spool dir",
+			desc = "Import users data from jabberd14 spool dir",
 			module = ?MODULE, function = import_dir,
 			args = [{file, string}],
 			result = {res, restuple}},
+
+     #ejabberd_commands{name = import_piefxis, tags = [mnesia],
+			desc = "Import users data from a PIEFXIS file (XEP-0227)",
+			module = ejabberd_piefxis, function = import_file,
+			args = [{file, string}], result = {res, rescode}},
+     #ejabberd_commands{name = export_piefxis, tags = [mnesia],
+			desc = "Export data of all users in the server to PIEFXIS files (XEP-0227)",
+			module = ejabberd_piefxis, function = export_server,
+			args = [{dir, string}], result = {res, rescode}},
+     #ejabberd_commands{name = export_piefxis_host, tags = [mnesia],
+			desc = "Export data of users in a host to PIEFXIS files (XEP-0227)",
+			module = ejabberd_piefxis, function = export_host,
+			args = [{dir, string}, {host, string}], result = {res, rescode}},
 
      #ejabberd_commands{name = delete_expired_messages, tags = [purge],
 			desc = "Delete expired offline messages from database",
@@ -133,6 +154,10 @@ commands() ->
 			desc = "Dump the database to text file",
 			module = ?MODULE, function = dump_mnesia,
 			args = [{file, string}], result = {res, restuple}},
+     #ejabberd_commands{name = dump_table, tags = [mnesia],
+			desc = "Dump a table to text file",
+			module = ?MODULE, function = dump_table,
+			args = [{file, string}, {table, string}], result = {res, restuple}},
      #ejabberd_commands{name = load, tags = [mnesia],
 			desc = "Restore the database from text file",
 			module = ?MODULE, function = load_mnesia,
@@ -320,19 +345,7 @@ module_tables(mod_shared_roster) -> [sr_group, sr_user];
 module_tables(mod_vcard) -> [vcard, vcard_search];
 module_tables(_Other) -> [].
 
-dump_mnesia(Path) ->
-    case dump_to_textfile(Path) of
-	ok ->
-	    {ok, ""};
-	{error, Reason} ->
-            String = io_lib:format("Can't store dump in ~p at node ~p: ~p",
-				   [filename:absname(Path), node(), Reason]),
-	    {cannot_dump, String}
-    end.
-
-dump_to_textfile(File) ->
-    dump_to_textfile(mnesia:system_info(is_running), file:open(File, [write])).
-dump_to_textfile(yes, {ok, F}) ->
+get_local_tables() ->
     Tabs1 = lists:delete(schema, mnesia:system_info(local_tables)),
     Tabs = lists:filter(
 	     fun(T) ->
@@ -342,6 +355,33 @@ dump_to_textfile(yes, {ok, F}) ->
 			 _ -> false
 		     end
 	     end, Tabs1),
+    Tabs.
+
+dump_mnesia(Path) ->
+    Tabs = get_local_tables(),
+    dump_tables(Path, Tabs).
+
+dump_table(Path, STable) ->
+    Table = list_to_atom(STable),
+    dump_tables(Path, [Table]).
+
+dump_tables(Path, Tables) ->
+    case dump_to_textfile(Path, Tables) of
+	ok ->
+	    {ok, ""};
+	{error, Reason} ->
+            String = io_lib:format("Can't store dump in ~p at node ~p: ~p",
+				   [filename:absname(Path), node(), Reason]),
+	    {cannot_dump, String}
+    end.
+
+dump_to_textfile(File) ->
+    Tabs = get_local_tables(),
+    dump_to_textfile(File, Tabs).
+
+dump_to_textfile(File, Tabs) ->
+    dump_to_textfile(mnesia:system_info(is_running), Tabs, file:open(File, [write])).
+dump_to_textfile(yes, Tabs, {ok, F}) ->
     Defs = lists:map(
 	     fun(T) -> {T, [{record_name, mnesia:table_info(T, record_name)},
 			    {attributes, mnesia:table_info(T, attributes)}]}
@@ -350,10 +390,10 @@ dump_to_textfile(yes, {ok, F}) ->
     io:format(F, "~p.~n", [{tables, Defs}]),
     lists:foreach(fun(T) -> dump_tab(F, T) end, Tabs),
     file:close(F);
-dump_to_textfile(_, {ok, F}) ->
+dump_to_textfile(_, _, {ok, F}) ->
     file:close(F),
     {error, mnesia_not_running};
-dump_to_textfile(_, {error, Reason}) ->
+dump_to_textfile(_, _, {error, Reason}) ->
     {error, Reason}.
 
 dump_tab(F, T) ->

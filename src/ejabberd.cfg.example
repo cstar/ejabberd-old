@@ -149,10 +149,15 @@
   %%			    }
   %%			   ]},
 
+  %%
+  %% ejabberd_stun: Handles STUN Binding requests
+  %%
+  %%{{3478, udp}, ejabberd_stun, []},
+
   {5280, ejabberd_http, [
 			 %%{request_handlers,
 			 %% [
-			 %%  {["pub", "archive"], mod_http_fileserver},
+			 %%  {["pub", "archive"], mod_http_fileserver}
 			 %% ]},
 			 captcha,
 			 http_bind,
@@ -496,6 +501,7 @@
 		 ]},
   %%{mod_muc_log,[]},
   {mod_offline,  [{access_max_user_messages, max_user_offline_messages}]},
+  {mod_ping,     []},
   {mod_privacy,  []},
   {mod_private,  []},
   %%{mod_proxy65,[]},
@@ -503,7 +509,7 @@
 		  {access_createnode, pubsub_createnode},
 		  {pep_sendlast_offline, false},
 		  {last_item_cache, false},
-		  {plugins, ["flat", "pep"]}  % pep requires mod_caps
+		  {plugins, ["flat", "hometree", "pep"]}  % pep requires mod_caps
 		 ]},
   {mod_register, [
 		  %%

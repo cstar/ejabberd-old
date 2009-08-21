@@ -32,6 +32,12 @@
 	 get_options_xform/2,
 	 parse_options_xform/1]).
 
+% Internal function also exported for use in transactional bloc from pubsub plugins
+-export([add_subscription/3,
+	 delete_subscription/3,
+	 read_subscription/3,
+	 write_subscription/4]).
+
 -include_lib("stdlib/include/qlc.hrl").
 
 -include("pubsub.hrl").
@@ -86,31 +92,31 @@ init() ->
     ok = create_table().
 
 subscribe_node(JID, NodeID, Options) ->
-    case mnesia:transaction(fun add_subscription/3,
+    case catch mnesia:sync_dirty(fun add_subscription/3,
 			    [JID, NodeID, Options]) of
-	{atomic, Result} -> {result, Result};
-	{aborted, Error} -> Error
+	{'EXIT', {aborted, Error}} -> Error;
+	Result -> {result, Result}
     end.
 
 unsubscribe_node(JID, NodeID, SubID) ->
-    case mnesia:transaction(fun delete_subscription/3,
+    case catch mnesia:sync_dirty(fun delete_subscription/3,
 			    [JID, NodeID, SubID]) of
-	{atomic, Result} -> {result, Result};
-	{aborted, Error} -> Error
+	{'EXIT', {aborted, Error}} -> Error;
+	Result -> {result, Result}
     end.
 
 get_subscription(JID, NodeID, SubID) ->
-    case mnesia:transaction(fun read_subscription/3,
+    case catch mnesia:sync_dirty(fun read_subscription/3,
 			    [JID, NodeID, SubID]) of
-	{atomic, Result} -> {result, Result};
-	{aborted, Error} -> Error
+	{'EXIT', {aborted, Error}} -> Error;
+	Result -> {result, Result}
     end.
 
 set_subscription(JID, NodeID, SubID, Options) ->
-    case mnesia:transaction(fun write_subscription/4,
+    case catch mnesia:sync_dirty(fun write_subscription/4,
 			    [JID, NodeID, SubID, Options]) of
-	{atomic, Result} -> {result, Result};
-	{aborted, Error} -> Error
+	{'EXIT', {aborted, Error}} -> Error;
+	Result -> {result, Result}
     end.
 
 get_options_xform(Lang, Options) ->

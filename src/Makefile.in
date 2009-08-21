@@ -63,7 +63,7 @@ endif
 prefix = @prefix@
 exec_prefix = @exec_prefix@
 
-SUBDIRS = @mod_irc@ @mod_pubsub@ @mod_muc@ @mod_proxy65@ @eldap@ @pam@ @web@ stringprep @tls@ @odbc@ @ejabberd_zlib@
+SUBDIRS = @mod_irc@ @mod_pubsub@ @mod_muc@ @mod_proxy65@ @eldap@ @pam@ @web@ stringprep stun @tls@ @odbc@ @ejabberd_zlib@
 ERLSHLIBS = expat_erl.so
 ERLBEHAVS = cyrsasl.erl gen_mod.erl p1_fsm.erl
 SOURCES_ALL = $(wildcard *.erl)
@@ -183,7 +183,7 @@ install: all
 	install -b -m 644 $(G_USER) inetrc $(ETCDIR)/inetrc
 	#
 	# Administration script
-	[ -d $(SBINDIR) ] || install -d -m 750 $(SBINDIR)
+	[ -d $(SBINDIR) ] || install -d -m 755 $(SBINDIR)
 	install -m 550 $(G_USER) ejabberdctl.example $(SBINDIR)/ejabberdctl
 	#
 	# Binary Erlang files

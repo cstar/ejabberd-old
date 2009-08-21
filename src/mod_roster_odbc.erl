@@ -24,6 +24,15 @@
 %%%
 %%%----------------------------------------------------------------------
 
+%%% @doc Roster management (Mnesia storage).
+%%%
+%%% Includes support for XEP-0237: Roster Versioning.
+%%% The roster versioning follows an all-or-nothing strategy:
+%%%  - If the version supplied by the client is the latest, return an empty response.
+%%%  - If not, return the entire new roster (with updated version string).
+%%% Roster version is a hash digest of the entire roster.
+%%% No additional data is stored in DB.
+
 -module(mod_roster_odbc).
 -author('alexey@process-one.net').
 
@@ -41,7 +50,9 @@
 	 remove_user/2,
 	 get_jid_info/4,
 	 webadmin_page/3,
-	 webadmin_user/4]).
+	 webadmin_user/4,
+	 get_versioning_feature/2,
+	 roster_versioning_enabled/1]).
 
 -include("ejabberd.hrl").
 -include("jlib.hrl").
@@ -68,6 +79,8 @@ start(Host, Opts) ->
 		       ?MODULE, remove_user, 50),
     ejabberd_hooks:add(resend_subscription_requests_hook, Host,
 		       ?MODULE, get_in_pending_subscriptions, 50),
+    ejabberd_hooks:add(roster_get_versioning_feature, Host,
+		       ?MODULE, get_versioning_feature, 50),
     ejabberd_hooks:add(webadmin_page_host, Host,
 		       ?MODULE, webadmin_page, 50),
     ejabberd_hooks:add(webadmin_user, Host,
@@ -92,6 +105,8 @@ stop(Host) ->
 			  ?MODULE, remove_user, 50),
     ejabberd_hooks:delete(resend_subscription_requests_hook, Host,
 		       ?MODULE, get_in_pending_subscriptions, 50),
+    ejabberd_hooks:delete(roster_get_versioning_feature, Host,
+		          ?MODULE, get_versioning_feature, 50),
     ejabberd_hooks:delete(webadmin_page_host, Host,
 			  ?MODULE, webadmin_page, 50),
     ejabberd_hooks:delete(webadmin_user, Host,
@@ -118,21 +133,100 @@ process_local_iq(From, To, #iq{type = Type} = IQ) ->
     end.
 
 
+roster_hash(Items) ->
+	sha:sha(term_to_binary(
+		lists:sort(
+			[R#roster{groups = lists:sort(Grs)} || 
+				R = #roster{groups = Grs} <- Items]))).
+		
+roster_versioning_enabled(Host) ->
+    gen_mod:get_module_opt(Host, ?MODULE, versioning, false).
 
+roster_version_on_db(Host) ->
+    gen_mod:get_module_opt(Host, ?MODULE, store_current_id, false).
+
+%% Returns a list that may contain an xmlelement with the XEP-237 feature if it's enabled.
+get_versioning_feature(Acc, Host) ->
+    case roster_versioning_enabled(Host) of
+	true ->
+	    Feature = {xmlelement,
+		       "ver",
+		       [{"xmlns", ?NS_ROSTER_VER}],
+		       [{xmlelement, "optional", [], []}]},
+	    [Feature | Acc];
+	false -> []
+    end.
+
+roster_version(LServer ,LUser) ->
+	US = {LUser, LServer},
+	case roster_version_on_db(LServer) of
+		true ->
+			case odbc_queries:get_roster_version(ejabberd_odbc:escape(LServer), ejabberd_odbc:escape(LUser)) of
+				{selected, ["version"], [{Version}]} -> Version;
+				{selected, ["version"], []} -> not_found
+			end;
+		false ->
+			roster_hash(ejabberd_hooks:run_fold(roster_get, LServer, [], [US]))
+	end.
+
+%% Load roster from DB only if neccesary. 
+%% It is neccesary if
+%%     - roster versioning is disabled in server OR
+%%     - roster versioning is not used by the client OR
+%%     - roster versioning is used by server and client, BUT the server isn't storing versions on db OR
+%%     - the roster version from client don't match current version.
 process_iq_get(From, To, #iq{sub_el = SubEl} = IQ) ->
     LUser = From#jid.luser,
     LServer = From#jid.lserver,
     US = {LUser, LServer},
-    case catch ejabberd_hooks:run_fold(roster_get, To#jid.lserver, [], [US]) of
-	Items when is_list(Items) ->
-	    XItems = lists:map(fun item_to_xml/1, Items),
-	    IQ#iq{type = result,
-		  sub_el = [{xmlelement, "query",
-			     [{"xmlns", ?NS_ROSTER}],
-			     XItems}]};
-	_ ->
-	    IQ#iq{type = error, sub_el = [SubEl, ?ERR_INTERNAL_SERVER_ERROR]}
+
+    try
+	    {ItemsToSend, VersionToSend} = 
+		case {xml:get_tag_attr("ver", SubEl), 
+		      roster_versioning_enabled(LServer),
+		      roster_version_on_db(LServer)} of
+		{{value, RequestedVersion}, true, true} ->
+			%% Retrieve version from DB. Only load entire roster
+			%% when neccesary.
+			case odbc_queries:get_roster_version(ejabberd_odbc:escape(LServer), ejabberd_odbc:escape(LUser)) of
+				{selected, ["version"], [{RequestedVersion}]} ->
+					{false, false};
+				{selected, ["version"], [{NewVersion}]} ->
+					{lists:map(fun item_to_xml/1, 
+						ejabberd_hooks:run_fold(roster_get, To#jid.lserver, [], [US])), NewVersion};
+				{selected, ["version"], []} ->
+					RosterVersion = sha:sha(term_to_binary(now())),
+					{atomic, {updated,1}} = odbc_queries:sql_transaction(LServer, fun() ->
+									odbc_queries:set_roster_version(ejabberd_odbc:escape(LUser), RosterVersion)
+								  end),
+
+					{lists:map(fun item_to_xml/1,
+						ejabberd_hooks:run_fold(roster_get, To#jid.lserver, [], [US])), RosterVersion}
+			end;
+
+		{{value, RequestedVersion}, true, false} ->
+			RosterItems = ejabberd_hooks:run_fold(roster_get, To#jid.lserver, [] , [US]),
+			case roster_hash(RosterItems) of
+				RequestedVersion ->
+					{false, false};
+				New ->
+					{lists:map(fun item_to_xml/1, RosterItems), New}
+			end;
+			
+		_ ->
+			{lists:map(fun item_to_xml/1, 
+					ejabberd_hooks:run_fold(roster_get, To#jid.lserver, [], [US])), false}
+		end,
+		IQ#iq{type = result, sub_el = case {ItemsToSend, VersionToSend} of
+					 	 {false, false} ->  [];
+						 {Items, false} -> [{xmlelement, "query", [{"xmlns", ?NS_ROSTER}], Items}];
+						 {Items, Version} -> [{xmlelement, "query", [{"xmlns", ?NS_ROSTER}, {"ver", Version}], Items}]
+						end}
+    catch 
+    	_:_ ->  
+		IQ#iq{type =error, sub_el = [SubEl, ?ERR_INTERNAL_SERVER_ERROR]}
     end.
+
 
 get_user_roster(Acc, {LUser, LServer}) ->
     Items = get_roster(LUser, LServer),
@@ -257,6 +351,7 @@ process_item_set(From, To, {xmlelement, _Name, Attrs, Els}) ->
 			Item2 = process_item_els(Item1, Els),
 			case Item2#roster.subscription of
 			    remove ->
+				io:format("del_roster: ~p ~p ~p \n", [LServer, Username, SJID]),
                                 odbc_queries:del_roster(LServer, Username, SJID);
 			    _ ->
 				ItemVals = record_to_string(Item2),
@@ -267,6 +362,10 @@ process_item_set(From, To, {xmlelement, _Name, Attrs, Els}) ->
 			%% subscription information from there:
 			Item3 = ejabberd_hooks:run_fold(roster_process_item,
 							LServer, Item2, [LServer]),
+			case roster_version_on_db(LServer) of
+				true -> odbc_queries:set_roster_version(ejabberd_odbc:escape(LUser), sha:sha(term_to_binary(now())));
+				false -> ok
+			end,
 			{Item, Item3}
 		end,
 	    case odbc_queries:sql_transaction(LServer, F) of
@@ -337,9 +436,14 @@ push_item(User, Server, From, Item) ->
 		       [{item,
 			 Item#roster.jid,
 			 Item#roster.subscription}]}),
-    lists:foreach(fun(Resource) ->
+    case roster_versioning_enabled(Server) of
+	true ->
+		push_item_version(Server, User, From, Item, roster_version(Server, User));
+	false ->
+	    lists:foreach(fun(Resource) ->
 			  push_item(User, Server, Resource, From, Item)
-		  end, ejabberd_sm:get_user_resources(User, Server)).
+		  end, ejabberd_sm:get_user_resources(User, Server))
+    end.
 
 % TODO: don't push to those who not load roster
 push_item(User, Server, Resource, From, Item) ->
@@ -352,6 +456,25 @@ push_item(User, Server, Resource, From, Item) ->
       From,
       jlib:make_jid(User, Server, Resource),
       jlib:iq_to_xml(ResIQ)).
+
+%% @doc Roster push, calculate and include the version attribute.
+%% TODO: don't push to those who didn't load roster
+push_item_version(Server, User, From, Item, RosterVersion)  ->
+    lists:foreach(fun(Resource) ->
+			  push_item_version(User, Server, Resource, From, Item, RosterVersion)
+		end, ejabberd_sm:get_user_resources(User, Server)).
+
+push_item_version(User, Server, Resource, From, Item, RosterVersion) ->
+    IQPush = #iq{type = 'set', xmlns = ?NS_ROSTER,
+		 id = "push" ++ randoms:get_string(),
+		 sub_el = [{xmlelement, "query",
+			    [{"xmlns", ?NS_ROSTER},
+			     {"ver", RosterVersion}],
+			    [item_to_xml(Item)]}]},
+    ejabberd_router:route(
+      From,
+      jlib:make_jid(User, Server, Resource),
+      jlib:iq_to_xml(IQPush)).
 
 get_subscription_lists(_, User, Server) ->
     LUser = jlib:nodeprep(User),
@@ -468,6 +591,10 @@ process_subscription(Direction, User, Server, JID1, Type, Reason) ->
 					      askmessage = AskMessage},
 			ItemVals = record_to_string(NewItem),
 			odbc_queries:roster_subscribe(LServer, Username, SJID, ItemVals),
+			case roster_version_on_db(LServer) of
+				true -> odbc_queries:set_roster_version(ejabberd_odbc:escape(LUser), sha:sha(term_to_binary(now())));
+				false -> ok
+			end,
 			{{push, NewItem}, AutoReply}
 		end
 	end,

@@ -557,6 +557,7 @@ handle_event({service_message, Msg}, _StateName, StateData) ->
       end,
       ?DICT:to_list(StateData#state.users)),
     NSD = add_message_to_history("",
+				 StateData#state.jid,
 				 MessagePkt,
 				 StateData),
     {next_state, normal_state, NSD};
@@ -1921,7 +1922,6 @@ extract_history([{xmlelement, _Name, Attrs, _SubEls} = El | Els], Type) ->
 extract_history([_ | Els], Type) ->
     extract_history(Els, Type).
 
-
 send_update_presence(JID, StateData) ->
     send_update_presence(JID, "", StateData).
 send_update_presence(JID, Reason, Headers) when is_record(Headers, headers)->
@@ -2251,7 +2251,6 @@ send_kickban_presence1(UJID, Reason, Code, Headers) ->
 		jlib:jid_replace_resource(Headers#headers.jid, Nick),
 		Info#user.jid,
 		Packet)
-
       end, ?DICT:to_list(Headers#headers.users)).
 
 destroy_room(DEl, #headers{}=Headers) ->
@@ -2497,8 +2496,13 @@ send_error_only_occupants(Packet, Lang, RoomJID, From) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Logging
-add_to_log(Type, Data, Headers) when is_record(Headers, headers) ->
-    add_to_log(Type, Data, headers_to_state(Headers));
+
+add_to_log(Type, Data, StateData)
+  when Type == roomconfig_change_disabledlogging ->
+    %% When logging is disabled, the config change message must be logged:
+    add_to_log(
+      StateData#state.server_host, roomconfig_change, Data,
+      StateData#state.jid, make_opts(StateData));
 add_to_log(Type, Data, StateData) ->
     case handler_call(should_log, [], StateData) of
 	{result, true, _} ->

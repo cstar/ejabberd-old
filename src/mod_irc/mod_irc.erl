@@ -35,7 +35,7 @@
 	 start/2,
 	 stop/1,
 	 closed_connection/3,
-	 get_user_and_encoding/3]).
+	 get_connection_params/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -46,6 +46,7 @@
 -include("adhoc.hrl").
 
 -define(DEFAULT_IRC_ENCODING, "iso8859-1").
+-define(DEFAULT_IRC_PORT, 6667).
 -define(POSSIBLE_ENCODINGS, ["koi8-r", "iso8859-1", "iso8859-2", "utf-8", "utf-8+latin-1"]).
 
 -record(irc_connection, {jid_server_host, pid}).
@@ -214,6 +215,9 @@ do_route1(Host, ServerHost, From, To, Packet) ->
 			#iq{type = get, xmlns = ?NS_DISCO_INFO = XMLNS,
 			    sub_el = SubEl, lang = Lang} = IQ ->
 			    Node = xml:get_tag_attr_s("node", SubEl),
+			    Info = ejabberd_hooks:run_fold(
+				     disco_info, ServerHost, [],
+				     [ServerHost, ?MODULE, "", ""]),
 			    case iq_disco(Node, Lang) of
 				[] ->
 				    Res = IQ#iq{type = result,
@@ -227,7 +231,7 @@ do_route1(Host, ServerHost, From, To, Packet) ->
 				    Res = IQ#iq{type = result,
 						sub_el = [{xmlelement, "query",
 							   [{"xmlns", XMLNS}],
-							   DiscoInfo}]},
+							   DiscoInfo ++ Info}]},
 				    ejabberd_router:route(To,
 							  From,
 							  jlib:iq_to_xml(Res))
@@ -325,7 +329,7 @@ do_route1(Host, ServerHost, From, To, Packet) ->
 		    case ets:lookup(irc_connection, {From, Server, Host}) of
 			[] ->
 			    ?DEBUG("open new connection~n", []),
-			    {Username, Encoding} = get_user_and_encoding(
+			    {Username, Encoding, Port, Password} = get_connection_params(
 						     Host, From, Server),
 			    ConnectionUsername =
 				case Packet of
@@ -344,7 +348,7 @@ do_route1(Host, ServerHost, From, To, Packet) ->
 				end,
 			    {ok, Pid} = mod_irc_connection:start(
 					  From, Host, ServerHost, Server,
-					  ConnectionUsername, Encoding),
+					  ConnectionUsername, Encoding, Port, Password),
 			    ets:insert(
 			      irc_connection,
 			      #irc_connection{jid_server_host = {From, Server, Host},
@@ -433,7 +437,7 @@ command_items(Host, Lang) ->
 
 commands() ->
     [{"join", "Join channel", fun adhoc_join/3},
-     {"register", "Configure username and encoding", fun adhoc_register/3}].
+     {"register", "Configure username, encoding, port and password", fun adhoc_register/3}].
 
 process_register(Host, From, To, #iq{} = IQ) ->
     case catch process_irc_register(Host, From, To, IQ) of
@@ -539,12 +543,12 @@ get_form(Host, From, [], Lang) ->
 		{User, []};
 	    [#irc_custom{data = Data}] ->
 		{xml:get_attr_s(username, Data),
-		 xml:get_attr_s(encodings, Data)}
+		 xml:get_attr_s(connections_params, Data)}
 	end,
     case Customs of
 	{error, _Error} ->
 	    Customs;
-	{Username, Encodings} ->
+	{Username, ConnectionsParams} ->
 	    {result,
 	     [{xmlelement, "instructions", [],
 	       [{xmlcdata,
@@ -562,7 +566,7 @@ get_form(Host, From, [], Lang) ->
 	               [{xmlcdata,
 	                 translate:translate(
 	                   Lang,
-			   "Enter username and encodings you wish to use for "
+			   "Enter username, encodings, ports and passwords you wish to use for "
 			   "connecting to IRC servers")}]},
 	        {xmlelement, "field", [{"type", "text-single"},
 				       {"label",
@@ -577,30 +581,32 @@ get_form(Host, From, [], Lang) ->
 		       io_lib:format(
 		         translate:translate(
 			   Lang,
-			   "If you want to specify different encodings "
-			   "for IRC servers, fill this list with values "
-			   "in format '{\"irc server\", \"encoding\"}'.  "
-			   "By default this service use \"~s\" encoding."),
-		         [?DEFAULT_IRC_ENCODING]))}]}]},
+			   "If you want to specify different ports, "
+			   "passwords, encodings for IRC servers, fill "
+			   "this list with values in format "
+			   "'{\"irc server\", \"encoding\", port, \"password\"}'.  "
+			   "By default this service use \"~s\" encoding, port ~p, "
+			   "empty password."),
+		         [?DEFAULT_IRC_ENCODING, ?DEFAULT_IRC_PORT]))}]}]},
 	        {xmlelement, "field", [{"type", "fixed"}],
 	         [{xmlelement, "value", [],
 		   [{xmlcdata,
 		     translate:translate(
 		       Lang,
-		       "Example: [{\"irc.lucky.net\", \"koi8-r\"}, "
-		       "{\"vendetta.fef.net\", \"iso8859-1\"}]."
+		       "Example: [{\"irc.lucky.net\", \"koi8-r\", 6667, \"secret\"}, "
+		       "{\"vendetta.fef.net\", \"iso8859-1\", 7000}, {\"irc.sometestserver.net\", \"utf-8\"}]."
 		    )}]}]},
 	        {xmlelement, "field", [{"type", "text-multi"},
 				       {"label",
-				        translate:translate(Lang, "Encodings")},
-				       {"var", "encodings"}],
+				        translate:translate(Lang, "Connections parameters")},
+				       {"var", "connections_params"}],
 		         lists:map(
 			   fun(S) ->
 				   {xmlelement, "value", [], [{xmlcdata, S}]}
 			   end,
 			   string:tokens(
 			     lists:flatten(
-			       io_lib:format("~p.", [Encodings])),
+			       io_lib:format("~p.", [ConnectionsParams])),
 			     "\n"))
 	        }
 	       ]}]}
@@ -616,7 +622,7 @@ set_form(Host, From, [], _Lang, XData) ->
     {LUser, LServer, _} = jlib:jid_tolower(From),
     US = {LUser, LServer},
     case {lists:keysearch("username", 1, XData),
-	  lists:keysearch("encodings", 1, XData)} of
+	  lists:keysearch("connections_params", 1, XData)} of
 	{{value, {_, [Username]}}, {value, {_, Strings}}} ->
 	    EncString = lists:foldl(fun(S, Res) ->
 					    Res ++ S ++ "\n"
@@ -624,7 +630,7 @@ set_form(Host, From, [], _Lang, XData) ->
 	    case erl_scan:string(EncString) of
 		{ok, Tokens, _} ->
 		    case erl_parse:parse_term(Tokens) of
-			{ok, Encodings} ->
+			{ok, ConnectionsParams} ->
 			    case mnesia:transaction(
 				   fun() ->
 					   mnesia:write(
@@ -633,8 +639,8 @@ set_form(Host, From, [], _Lang, XData) ->
 							 data =
 							 [{username,
 							   Username},
-							  {encodings,
-							   Encodings}]})
+							  {connections_params,
+							   ConnectionsParams}]})
 				   end) of
 				{atomic, _} ->
 				    {result, []};
@@ -656,22 +662,38 @@ set_form(_Host, _, _, _Lang, _XData) ->
     {error, ?ERR_SERVICE_UNAVAILABLE}.
 
 
-get_user_and_encoding(Host, From, IRCServer) ->
+get_connection_params(Host, From, IRCServer) ->
     #jid{user = User, server = _Server,
 	 luser = LUser, lserver = LServer} = From,
     US = {LUser, LServer},
     case catch mnesia:dirty_read({irc_custom, {US, Host}}) of
 	{'EXIT', _Reason} ->
-	    {User, ?DEFAULT_IRC_ENCODING};
+	    {User, ?DEFAULT_IRC_ENCODING, ?DEFAULT_IRC_PORT, ""};
 	[] ->
-	    {User, ?DEFAULT_IRC_ENCODING};
+	    {User, ?DEFAULT_IRC_ENCODING, ?DEFAULT_IRC_PORT, ""};
 	[#irc_custom{data = Data}] ->
-	    {xml:get_attr_s(username, Data),
-	     case xml:get_attr_s(IRCServer, xml:get_attr_s(encodings, Data)) of
-		"" -> ?DEFAULT_IRC_ENCODING;
-		E -> E
-	     end}
-    end.
+	    Username = xml:get_attr_s(username, Data),
+	    {NewUsername, NewEncoding, NewPort, NewPassword} = 
+    		case lists:keysearch(IRCServer, 1, xml:get_attr_s(connections_params, Data)) of
+	    	    {value, {_, Encoding, Port, Password}} ->
+		        {Username, Encoding, Port, Password};
+		    {value, {_, Encoding, Port}} ->
+			{Username, Encoding, Port, ""};
+		    {value, {_, Encoding}} ->
+			{Username, Encoding, ?DEFAULT_IRC_PORT, ""};
+		    _ ->
+			{Username, ?DEFAULT_IRC_ENCODING, ?DEFAULT_IRC_PORT, ""}
+    		end,
+	    {NewUsername, 
+	     NewEncoding, 
+	     if 
+	        NewPort >= 0 andalso NewPort =< 65535 -> 
+		    NewPort; 
+		true -> 
+		    ?DEFAULT_IRC_PORT
+	     end,
+	     NewPassword}
+      end.
 
 adhoc_join(_From, _To, #adhoc_request{action = "cancel"} = Request) ->
     adhoc:produce_response(Request,
@@ -763,13 +785,13 @@ adhoc_register(From, To, #adhoc_request{lang = Lang,
 	    case catch mnesia:dirty_read({irc_custom, {US, Host}}) of
 		{'EXIT', _Reason} ->
 		    Username = User,
-		    Encodings = [];
+		    ConnectionsParams = [];
 		[] ->
 		    Username = User,
-		    Encodings = [];
+		    ConnectionsParams = [];
 		[#irc_custom{data = Data}] ->
 		    Username = xml:get_attr_s(username, Data),
-		    Encodings = xml:get_attr_s(encodings, Data)
+		    ConnectionsParams = xml:get_attr_s(connections_params, Data)
 	    end,
 	    Error = false;
        true ->
@@ -777,7 +799,7 @@ adhoc_register(From, To, #adhoc_request{lang = Lang,
 		invalid ->
 		    Error = {error, ?ERR_BAD_REQUEST},
 		    Username = false,
-		    Encodings = false;
+		    ConnectionsParams = false;
 		Fields ->
 		    Username = case lists:keysearch("username", 1, Fields) of
 				   {value, {"username", U}} ->
@@ -785,7 +807,7 @@ adhoc_register(From, To, #adhoc_request{lang = Lang,
 				   _ ->
 				       User
 			       end,
-		    Encodings = parse_encodings(Fields),
+		    ConnectionsParams = parse_connections_params(Fields),
 		    Error = false
 	    end
     end,
@@ -801,8 +823,8 @@ adhoc_register(From, To, #adhoc_request{lang = Lang,
 					 data =
 					 [{username,
 					   Username},
-					  {encodings,
-					   Encodings}]})
+					  {connections_params,
+					   ConnectionsParams}]})
 		   end) of
 		{atomic, _} ->
 		    adhoc:produce_response(Request, #adhoc_response{status = completed});
@@ -810,14 +832,14 @@ adhoc_register(From, To, #adhoc_request{lang = Lang,
 		    {error, ?ERR_INTERNAL_SERVER_ERROR}
 	    end;
        true ->
-	    Form = generate_adhoc_register_form(Lang, Username, Encodings),
+	    Form = generate_adhoc_register_form(Lang, Username, ConnectionsParams),
 	    adhoc:produce_response(Request,
 				   #adhoc_response{status = executing,
 						   elements = [Form],
 						   actions = ["next", "complete"]})
     end.
 
-generate_adhoc_register_form(Lang, Username, Encodings) ->
+generate_adhoc_register_form(Lang, Username, ConnectionsParams) ->
     {xmlelement, "x",
      [{"xmlns", ?NS_XDATA},
       {"type", "form"}],
@@ -835,25 +857,61 @@ generate_adhoc_register_form(Lang, Username, Encodings) ->
 	{"label", translate:translate(Lang, "IRC username")}], 
        [{xmlelement, "required", [], []},
 	{xmlelement, "value", [], [{xmlcdata, Username}]}]}] ++
-    generate_encoding_fields(Lang, Encodings, 1, [])}.
+    generate_connection_params_fields(Lang, ConnectionsParams, 1, [])}.
 
-generate_encoding_fields(Lang, [], Number, Acc) ->
-    Field = generate_encoding_field(Lang, "", "", Number),
+generate_connection_params_fields(Lang, [], Number, Acc) ->
+    Field = generate_connection_params_field(Lang, "", "", -1, "", Number),
     lists:reverse(Field ++ Acc);
-generate_encoding_fields(Lang, [{Server, Encoding} | Encodings], Number, Acc) ->
-    Field = generate_encoding_field(Lang, Server, Encoding, Number),
-    generate_encoding_fields(Lang, Encodings, Number + 1, Field ++ Acc).
+    
+generate_connection_params_fields(Lang, [ConnectionParams | ConnectionsParams], Number, Acc) ->
+    case ConnectionParams of
+	{Server, Encoding, Port, Password} ->
+	    Field = generate_connection_params_field(Lang, Server, Encoding, Port, Password, Number),
+	    generate_connection_params_fields(Lang, ConnectionsParams, Number + 1, Field ++ Acc);	
+	{Server, Encoding, Port} ->	    
+	    Field = generate_connection_params_field(Lang, Server, Encoding, Port, [], Number),
+	    generate_connection_params_fields(Lang, ConnectionsParams, Number + 1, Field ++ Acc);
+	{Server, Encoding} ->	
+	    Field = generate_connection_params_field(Lang, Server, Encoding, [], [], Number),
+	    generate_connection_params_fields(Lang, ConnectionsParams, Number + 1, Field ++ Acc);
+	_ -> 
+	    []
+    end.
 
-generate_encoding_field(Lang, Server, Encoding, Number) ->
+generate_connection_params_field(Lang, Server, Encoding, Port, Password, Number) ->
     EncodingUsed = case Encoding of
 		       [] ->
 			   ?DEFAULT_IRC_ENCODING;
 		       _ ->
 			   Encoding
 		   end,
+    PortUsedInt = if
+		    Port >= 0 andalso Port =< 65535 ->
+			Port;
+		    true ->
+			?DEFAULT_IRC_PORT
+	       end,	
+    PortUsed = integer_to_list(PortUsedInt),
+    PasswordUsed = case Password of
+		    [] -> 
+			"";
+		    _ -> 
+			Password
+		   end,	      		
+    NumberString = integer_to_list(Number),
     %% Fields are in reverse order, as they will be reversed again later.
     [{xmlelement, "field",
-      [{"var", "encoding" ++ io_lib:format("~b", [Number])},
+      [{"var", "password" ++ NumberString},
+       {"type", "text-single"},
+       {"label", io_lib:format(translate:translate(Lang, "Password ~b"), [Number])}],
+      [{xmlelement, "value", [], [{xmlcdata, PasswordUsed}]}]},
+     {xmlelement, "field",
+      [{"var", "port" ++ NumberString},
+       {"type", "text-single"},
+       {"label", io_lib:format(translate:translate(Lang, "Port ~b"), [Number])}],
+      [{xmlelement, "value", [], [{xmlcdata, PortUsed}]}]},    
+     {xmlelement, "field",
+      [{"var", "encoding" ++ NumberString},
        {"type", "list-single"},
        {"label", io_lib:format(translate:translate(Lang, "Encoding for server ~b"), [Number])}],
       [{xmlelement, "value", [], [{xmlcdata, EncodingUsed}]} |
@@ -862,13 +920,13 @@ generate_encoding_field(Lang, Server, Encoding, Number) ->
 			  [{xmlelement, "value", [], [{xmlcdata, E}]}]}
 		 end, ?POSSIBLE_ENCODINGS)]},
      {xmlelement, "field",
-      [{"var", "server" ++ io_lib:format("~b", [Number])},
+      [{"var", "server" ++ NumberString},
        {"type", "text-single"},
        {"label", io_lib:format(translate:translate(Lang, "Server ~b"), [Number])}],
       [{xmlelement, "value", [], [{xmlcdata, Server}]}]}].
 
-parse_encodings(Fields) ->
-    %% Find all fields staring with serverN and encodingN, for any values
+parse_connections_params(Fields) ->
+    %% Find all fields staring with serverN, encodingN, portN and passwordN for any values
     %% of N, and generate lists of {"N", Value}.
     Servers = lists:sort(
 		[{lists:nthtail(6, Var), lists:flatten(Value)} || {Var, Value} <- Fields,
@@ -876,25 +934,46 @@ parse_encodings(Fields) ->
     Encodings = lists:sort(
 		  [{lists:nthtail(8, Var), lists:flatten(Value)} || {Var, Value} <- Fields,
 								    lists:prefix("encoding", Var)]),
+								    
+    Ports = lists:sort(
+	      [{lists:nthtail(4, Var), lists:flatten(Value)} || {Var, Value} <- Fields,
+								lists:prefix("port", Var)]),
+								  
+    Passwords = lists:sort(
+		  [{lists:nthtail(8, Var), lists:flatten(Value)} || {Var, Value} <- Fields,
+								    lists:prefix("password", Var)]),
     
     %% Now sort the lists, and find the corresponding pairs.
-    parse_encodings(Servers, Encodings).
-
-parse_encodings([{ServerN, Server} | Servers], [{EncodingN, Encoding} | Encodings]) ->
-    %% Try to match pairs of servers and encodings, no matter what fields
-    %% the client might have left out.
-    if ServerN == EncodingN ->
-	    [{Server, Encoding} | parse_encodings(Servers, Encodings)];
-       ServerN < EncodingN ->
-	    parse_encodings(Servers, [{EncodingN, Encoding} | Encodings]);
-       ServerN > EncodingN ->
-	    parse_encodings([{ServerN, Server} | Servers], Encodings)
-    end;
-parse_encodings([], _) ->
+    parse_connections_params(Servers, Encodings, Ports, Passwords).
+    
+retrieve_connections_params(ConnectionParams, ServerN) ->
+    case ConnectionParams of
+        [{ConnectionParamN, ConnectionParam} | ConnectionParamsTail] ->	    
+    	    if 
+		ServerN == ConnectionParamN ->
+	    	    {ConnectionParam, ConnectionParamsTail};		
+	        ServerN < ConnectionParamN ->
+		    {[], [{ConnectionParamN, ConnectionParam} | ConnectionParamsTail]};
+		ServerN > ConnectionParamN ->    
+		    {[], ConnectionParamsTail}
+	    end;
+	    _ ->
+		{[], []}
+	end.
+	
+parse_connections_params([], _, _, _) ->
     [];
-parse_encodings(_, []) ->
-    [].
+parse_connections_params(_, [], [], []) ->
+    [];	
 
+parse_connections_params([{ServerN, Server} | Servers], Encodings, Ports, Passwords) ->
+    %% Try to match matches of servers, ports, passwords and encodings, no matter what fields
+    %% the client might have left out.
+    {NewEncoding, NewEncodings} = retrieve_connections_params(Encodings, ServerN),
+    {NewPort, NewPorts} = retrieve_connections_params(Ports, ServerN),
+    {NewPassword, NewPasswords} = retrieve_connections_params(Passwords, ServerN),
+    [{Server, NewEncoding, NewPort, NewPassword} | parse_connections_params(Servers, NewEncodings, NewPorts, NewPasswords)].
+	    
 update_table(Host) ->
     Fields = record_info(fields, irc_custom),
     case mnesia:table_info(irc_custom, attributes) of

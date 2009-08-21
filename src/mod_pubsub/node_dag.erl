@@ -42,7 +42,8 @@
 	 get_entity_subscriptions/2,
 	 get_node_subscriptions/1,
 	 get_subscriptions/2,
-	 set_subscriptions/3,
+	 set_subscriptions/4,
+	 get_pending_nodes/2,
 	 get_states/1,
 	 get_state/2,
 	 set_state/1,
@@ -86,8 +87,25 @@ unsubscribe_node(NodeID, Sender, Subscriber, SubID) ->
     node_hometree:unsubscribe_node(NodeID, Sender, Subscriber, SubID).
 
 publish_item(NodeID, Publisher, Model, MaxItems, ItemID, Payload) ->
-    node_hometree:publish_item(NodeID, Publisher, Model, MaxItems,
-			      ItemID, Payload).
+    %% TODO: should look up the NodeTree plugin here. There's no
+    %% access to the Host of the request at this level, so for now we
+    %% just use nodetree_dag.
+    case nodetree_dag:get_node(NodeID) of
+        #pubsub_node{options = Options} ->
+            case find_opt(node_type, Options) of
+                collection ->
+                    {error, ?ERR_EXTENDED(?ERR_NOT_ALLOWED, "publish")};
+                _ ->
+                    node_hometree:publish_item(NodeID, Publisher, Model,
+                                               MaxItems, ItemID, Payload)
+            end;
+        Err ->
+            Err
+    end.
+
+find_opt(_,      [])                    -> false;
+find_opt(Option, [{Option, Value} | _]) -> Value;
+find_opt(Option, [_ | T])               -> find_opt(Option, T).
 
 remove_extra_items(NodeID, MaxItems, ItemIDs) ->
     node_hometree:remove_extra_items(NodeID, MaxItems, ItemIDs).
@@ -119,8 +137,11 @@ get_node_subscriptions(NodeID) ->
 get_subscriptions(NodeID, Owner) ->
     node_hometree:get_subscriptions(NodeID, Owner).
 
-set_subscriptions(NodeID, Owner, Subscriptions) ->
-    node_hometree:set_subscriptions(NodeID, Owner, Subscriptions).
+set_subscriptions(NodeID, Owner, Subscription, SubID) ->
+    node_hometree:set_subscriptions(NodeID, Owner, Subscription, SubID).
+
+get_pending_nodes(Host, Owner) ->
+    node_hometree:get_pending_nodes(Host, Owner).
 
 get_states(NodeID) ->
     node_hometree:get_states(NodeID).

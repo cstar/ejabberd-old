@@ -26,7 +26,7 @@
 %%% @doc The module <strong>{@module}</strong> is the PubSub node tree plugin that
 %%% allow virtual nodes handling.
 %%% <p>PubSub node tree plugins are using the {@link gen_nodetree} behaviour.</p>
-%%% This plugin development is still a work in progress. Due to optimizations in
+%%% <p>This plugin development is still a work in progress. Due to optimizations in
 %%% mod_pubsub, this plugin can not work anymore without altering functioning.
 %%% Please, send us comments, feedback and improvements.</p>
 
@@ -85,20 +85,26 @@ options() ->
 set_node(_NodeRecord) ->
     ok.
 
-%% @spec (Host, Node) -> pubsubNode()
+%% @spec (Host, Node, From) -> pubsubNode()
 %%     Host = mod_pubsub:host()
 %%     Node = mod_pubsub:pubsubNode()
+%%     From = mod_pubsub:jid()
 %% @doc <p>Virtual node tree does not handle a node database. Any node is considered
 %% as existing. Node record contains default values.</p>
 get_node(Host, Node, _From) ->
     get_node(Host, Node).
 get_node(Host, Node) ->
-    #pubsub_node{nodeid = {Host, Node}, id = {Host, Node}, owners = [{"",Host,""}]}.
+    get_node({Host, Node}).
 get_node({Host, _} = NodeId) ->
-    #pubsub_node{nodeid = NodeId, id = NodeId, owners = [{"",Host,""}]}.
+    Record = #pubsub_node{nodeid = NodeId, id = NodeId},
+    Module = list_to_atom("node_" ++ Record#pubsub_node.type),
+    Options = Module:options(),
+    Owners = [{"", Host, ""}],
+    Record#pubsub_node{owners = Owners, options = Options}.
 
-%% @spec (Host) -> [pubsubNode()]
+%% @spec (Host, From) -> [pubsubNode()]
 %%     Host = mod_pubsub:host() | mod_pubsub:jid()
+%%     From = mod_pubsub:jid()
 %% @doc <p>Virtual node tree does not handle a node database. Any node is considered
 %% as existing. Nodes list can not be determined.</p>
 get_nodes(Host, _From) ->
@@ -132,9 +138,10 @@ get_subnodes(Host, Node, _From) ->
 get_subnodes(_Host, _Node) ->
     [].
 
-%% @spec (Host, Index) -> [pubsubNode()]
+%% @spec (Host, Node, From) -> [pubsubNode()]
 %%     Host = mod_pubsub:host()
 %%     Node = mod_pubsub:pubsubNode()
+%%     From = mod_pubsub:jid()
 %% @doc <p>Virtual node tree does not handle parent/child. Child list is empty.</p>
 get_subnodes_tree(Host, Node, _From) ->
     get_subnodes_tree(Host, Node).
@@ -150,13 +157,8 @@ get_subnodes_tree(_Host, _Node) ->
 %% @doc <p>No node record is stored on database. Any valid node
 %% is considered as already created.</p>
 %% <p>default allowed nodes: /home/host/user/any/node/name</p>
-create_node(Host, Node, _Type, Owner, _Options) ->
-    UserName = Owner#jid.luser,
-    UserHost = Owner#jid.lserver,
-    case Node of
-	["home", UserHost, UserName | _] -> {error, {virtual, {Host, Node}}};
-	_ -> {error, ?ERR_NOT_ALLOWED}
-    end.
+create_node(Host, Node, _Type, _Owner, _Options) ->
+	{error, {virtual, {Host, Node}}}.
 
 %% @spec (Host, Node) -> [mod_pubsub:node()]
 %%     Host = mod_pubsub:host()

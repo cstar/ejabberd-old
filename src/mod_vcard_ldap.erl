@@ -406,6 +406,7 @@ do_route(State, From, To, Packet) ->
 
 route(State, From, To, Packet) ->
     #jid{user = User, resource = Resource} = To,
+    ServerHost = State#state.serverhost,
     if
 	(User /= "") or (Resource /= "") ->
 	    Err = jlib:make_error_reply(Packet, ?ERR_SERVICE_UNAVAILABLE),
@@ -467,6 +468,9 @@ route(State, From, To, Packet) ->
 				    Packet, ?ERR_NOT_ALLOWED),
 			    ejabberd_router:route(To, From, Err);
 			get ->
+			    Info = ejabberd_hooks:run_fold(
+				     disco_info, ServerHost, [],
+				     [ServerHost, ?MODULE, "", ""]),
 			    ResIQ =
 				IQ#iq{type = result,
 				      sub_el = [{xmlelement,
@@ -482,7 +486,7 @@ route(State, From, To, Packet) ->
 						   [{"var", ?NS_SEARCH}], []},
 						  {xmlelement, "feature",
 						   [{"var", ?NS_VCARD}], []}
-						 ]
+						 ] ++ Info
 						}]},
 			    ejabberd_router:route(To,
 						  From,
@@ -639,8 +643,10 @@ map_vcard_attr(VCardName, Attributes, Pattern, UD) ->
     end.
 
 process_pattern(Str, {User, Domain}, AttrValues) ->
-	eldap_filter:do_sub(Str,
-		[{"%s", V, 1} || V <- AttrValues] ++ [{"%u", User},{"%d", Domain}]).
+    eldap_filter:do_sub(
+      Str,
+      [{"%u", User},{"%d", Domain}] ++
+      [{"%s", V, 1} || V <- AttrValues]).
 
 find_xdata_el({xmlelement, _Name, _Attrs, SubEls}) ->
     find_xdata_el1(SubEls).
