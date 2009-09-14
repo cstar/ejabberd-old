@@ -242,10 +242,11 @@ create_node(Key, Node, Type, Owner, Options) ->
 			case lists:sublist(Node, length(Node) - 1) of
 			[] -> 
 			    {[], true};
-			_ ->
+			Parent ->
 			    case get_node(Key, Parent) of
 				{error, ?ERR_ITEM_NOT_FOUND} -> {Parent, false};
-				_ -> {Parent, true}
+				#pubsub_node{owners = Owners} ->  {Parent, lists:member(BJID, Owners)};
+				_ -> {Parent, false}
 			    end
 			end
 		end,
@@ -258,7 +259,7 @@ create_node(Key, Node, Type, Owner, Options) ->
 					      parents = [ParentNode],
 					      id = {Key, Node},
 					      type = Type,
-					      owners = [OwnerKey],
+					      owners = [BJID],
 					      options = Options}),
 			{ok, {Key, Node}};
 		false ->

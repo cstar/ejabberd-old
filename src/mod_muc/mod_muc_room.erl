@@ -556,7 +556,7 @@ handle_event({service_message, Msg}, _StateName, StateData) ->
 		MessagePkt)
       end,
       ?DICT:to_list(StateData#state.users)),
-    NSD = add_message_to_history("",
+    NSD = add_message_to_history(
 				 StateData#state.jid,
 				 MessagePkt,
 				 StateData),
@@ -2500,9 +2500,14 @@ send_error_only_occupants(Packet, Lang, RoomJID, From) ->
 add_to_log(Type, Data, StateData)
   when Type == roomconfig_change_disabledlogging ->
     %% When logging is disabled, the config change message must be logged:
-    add_to_log(
+   case handler_call(should_log, [], StateData) of
+	{result, true, _} ->
+	  mod_muc_log:add_to_log(
       StateData#state.server_host, roomconfig_change, Data,
-      StateData#state.jid, make_opts(StateData));
+      StateData#state.jid, StateData);
+    	_ ->
+	    ok
+    end;
 add_to_log(Type, Data, StateData) ->
     case handler_call(should_log, [], StateData) of
 	{result, true, _} ->
