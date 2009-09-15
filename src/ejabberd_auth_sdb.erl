@@ -24,8 +24,6 @@
 %%%
 %%%----------------------------------------------------------------------
 
-
-
 -module(ejabberd_auth_sdb).
 -author('eric@ohmforce.com').
 %% External exports
@@ -51,13 +49,14 @@
 % key : user@host
 % attributes : user host password
 % Domain users
-start(_Host)->
+start(Host)->
+    Domain = get_domain(Host),
     erlsdb:start(),
     {ok, Domains, _Token}  = erlsdb:list_domains(),
-    case lists:member(?DOMAIN, Domains) of 
+    case lists:member(Domain, Domains) of 
         false ->
-            erlsdb:create_domain(?DOMAIN),
-            ?INFO_MSG("SimpleDB domain ~s created", [?DOMAIN]);
+            erlsdb:create_domain(Domain),
+            ?INFO_MSG("SimpleDB domain ~s created", [Domain]);
         true -> ok
     end,
     ok.
@@ -69,7 +68,7 @@ check_password(User, Server, Password) ->
     LUser = jlib:nameprep(User),
     LServer = jlib:nodeprep(Server),
     Salt = os:getenv("EJABBERD_SALT"),
-    case catch erlsdb:get_attributes(?DOMAIN, LUser ++"@" ++LServer, ["password"]) of
+    case catch erlsdb:get_attributes(get_domain(Server), LUser ++"@" ++LServer, ["password"]) of
         {ok, [{"password", Hash}]} -> 
             Computed = sha2:hexdigest256(Password ++ Salt),
             Hash == Computed;
@@ -78,25 +77,6 @@ check_password(User, Server, Password) ->
 
 check_password(User, Server, Password, _StreamID, _Digest) ->
     check_password(User, Server, Password).
-%    LUser = jlib:nodeprep(User),
-%    LServer = jlib:nameprep(Server),
-%    JID = LUser ++ "@" ++LServer,
-%    case catch erlsdb:get_attributes(?DOMAIN, JID, ["password"]) of
-%        {ok, [{"password", Passwd}]} -> 
-%	    DigRes = if
-%			 Digest /= "" ->
-%			     Digest == sha:sha(StreamID ++ Passwd);
-%			 true ->
-%			     false
-%		     end,
-%	    if DigRes ->
-%		    true;
-%	       true ->
-%		    (Passwd == Password) and (Password /= "")
-%	    end;
-%	_ ->
-%	    false
-%    end.
 
 is_user_exists(User, Server) ->
     LUser = jlib:nameprep(User),
@@ -118,7 +98,7 @@ set_password(User, Server, Password) ->
 	true ->
 	    Salt = os:getenv("EJABBERD_SALT"),
 	    Hash = sha2:hexdigest256(Password ++ Salt),
-	    erlsdb:replace_attributes(?DOMAIN, LUser ++"@" ++LServer, [{"password", Hash}]),
+	    erlsdb:replace_attributes(get_domain(Server), LUser ++"@" ++LServer, [{"password", Hash}]),
 	    ok
     end.
 
@@ -126,14 +106,15 @@ set_password(User, Server, Password) ->
 try_register(User, Server, Password) ->
     LUser = jlib:nameprep(User),
     LServer = jlib:nameprep(Server),
+    Domain = get_domain(Server),
     if
 	(LUser == error) or (LServer == error) ->
 	    {error, invalid_jid};
 	true ->
-	    case catch erlsdb:get_attributes(?DOMAIN,  LUser ++"@" ++LServer) of
+	    case catch erlsdb:get_attributes(Domain,  LUser ++"@" ++LServer) of
             {ok, []} -> 
                 Salt = os:getenv("EJABBERD_SALT"),
-                erlsdb:put_attributes(?DOMAIN, LUser ++"@" ++LServer, [{"password", sha2:hexdigest256(Password ++ Salt)}, {"name", LUser}, {"host", LServer}]),
+                erlsdb:put_attributes(Domain, LUser ++"@" ++LServer, [{"password", sha2:hexdigest256(Password ++ Salt)}, {"name", LUser}, {"host", LServer}]),
                 {atomic, ok} ;
 	        {ok, _U} ->
 	            {atomic, exists};
@@ -149,7 +130,7 @@ get_vh_registered_users(Host)->
     get_users([], "['host' = '"++ Host ++"']", none).
 
 get_vh_registered_users_number(Host)->
-   {ok,[{"Domain",[{"Count",SCount}]}],nil} = erlsdb:s("select count(*) from " ++ ?DOMAIN ++" where host = '"++Host++"'"),
+   {ok,[{"Domain",[{"Count",SCount}]}],nil} = erlsdb:s("select count(*) from " ++ get_domain(Host) ++" where host = '"++Host++"'"),
    {Count, _} = string:to_integer(SCount),
    Count.
 
@@ -200,7 +181,7 @@ get_password_s(_User, _Server) ->
 remove_user(User, Server) ->
     LUser = jlib:nameprep(User),
     LServer = jlib:nodeprep(Server),
-    catch erlsdb:delete_attributes(?DOMAIN, LUser ++"@" ++LServer, ["password", "user", "host"]),
+    catch erlsdb:delete_attributes(get_domain(Server), LUser ++"@" ++LServer, ["password", "user", "host"]),
 	ok.
 
 %% @spec (User, Server, Password) -> ok | not_exists | not_allowed | bad_request
@@ -208,7 +189,7 @@ remove_user(User, Server) ->
 remove_user(User, Server, Password) ->
     LUser = jlib:nameprep(User),
     LServer = jlib:nodeprep(Server),
-    case catch erlsdb:get_attributes(?DOMAIN, LUser ++"@" ++LServer, ["password"]) of
+    case catch erlsdb:get_attributes(get_domain(Server), LUser ++"@" ++LServer, ["password"]) of
     {ok, [{"password", Password}]} ->
 			remove_user(User, Server),
 			ok;
@@ -218,4 +199,9 @@ remove_user(User, Server, Password) ->
 			not_exists;
 	_ -> bad_request
 	end.
-   
+ 
+get_domain(Host)->
+    case ejabberd_config:get_local_option({sdb_domain, Host}) of
+        undefined -> ?DOMAIN;
+        Domain -> Domain
+    end.

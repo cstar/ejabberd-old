@@ -267,7 +267,8 @@
 %%
 %% LDAP filter:
 %%{ldap_filter, "(objectClass=shadowAccount)"}.
-
+%% 
+%% {sdb_domain, "users"}.
 %%
 %% Anonymous login support:
 %%   auth_method: anonymous
