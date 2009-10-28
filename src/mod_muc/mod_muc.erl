@@ -206,10 +206,6 @@ init([Host, Opts]) ->
     ejabberd_router:register_route(MyHost),
     case Storage:init(Host, MyHost, Opts) of
         ok -> 
-            %load_permanent_rooms(MyHost, Host,
-	        %		 {Access, AccessCreate, AccessAdmin, AccessPersistent},
-	        %		 HistorySize,
-	        %		 RoomShaper, Storage),
             {ok, #state{host = MyHost,
 	        	server_host = Host,
 	        	access = {Access, AccessCreate, AccessAdmin, AccessPersistent},
