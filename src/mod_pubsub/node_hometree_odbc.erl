@@ -81,7 +81,9 @@
 	 get_item/2,
 	 set_item/1,
 	 get_item_name/3,
-	 get_last_items/3
+	 get_last_items/3,
+	 path_to_node/1,
+	 node_to_path/1
 	]).
 
 -export([
@@ -142,11 +144,12 @@ options() ->
      {notify_delete, false},
      {notify_retract, true},
      {persist_items, true},
-     {max_items, ?MAXITEMS div 2},
+     {max_items, ?MAXITEMS},
      {subscribe, true},
      {access_model, open},
      {roster_groups_allowed, []},
      {publish_model, publishers},
+     {notification_type, headline},
      {max_payload_size, ?MAX_PAYLOAD_SIZE},
      {send_last_published_item, on_sub_and_presence},
      {deliver_notifications, true},
@@ -209,7 +212,7 @@ create_node_permission(Host, ServerHost, Node, _ParentNode, Owner, Access) ->
 	_ ->
 	    case acl:match_rule(ServerHost, Access, LOwner) of
 		allow ->
-		    case Node of
+		    case node_to_path(Node) of
 			["home", Server, User | _] -> true;
 			_ -> false
 		    end;
@@ -318,9 +321,6 @@ subscribe_node(NodeId, Sender, Subscriber, AccessModel,
 	(AccessModel == whitelist) and (not Whitelisted) ->
 	    %% Node has whitelist access model and entity lacks required affiliation
 	    {error, ?ERR_EXTENDED(?ERR_NOT_ALLOWED, "closed-node")};
-	(AccessModel == authorize) -> % TODO: to be done
-	    %% Node has authorize access model
-	    {error, ?ERR_FORBIDDEN};
 	%%MustPay ->
 	%%	% Payment is required for a subscription
 	%%	{error, ?ERR_PAYMENT_REQUIRED};
@@ -392,8 +392,7 @@ unsubscribe_node(NodeId, Sender, Subscriber, SubId) ->
 		    delete_subscription(SubKey, NodeId, S, Affiliation, Subscriptions),
 		    {result, default};
 		false ->
-		    {error, ?ERR_EXTENDED(?ERR_UNEXPECTED_REQUEST,
-					  "not-subscribed")}
+		    {error, ?ERR_EXTENDED(?ERR_UNEXPECTED_REQUEST, "not-subscribed")}
 	    end;
 	%% No subid supplied, but there's only one matching
 	%% subscription, so use that.
@@ -559,9 +558,12 @@ purge_node(NodeId, Owner) ->
     GenKey = jlib:jid_remove_resource(SubKey),
     GenState = get_state(NodeId, GenKey),
     case GenState of
-	#pubsub_state{items = Items, affiliation = owner} ->
-	    del_items(NodeId, Items),
-	    %% set new item list use useless
+	#pubsub_state{affiliation = owner} ->
+	    {result, States} = get_states(NodeId),
+	    lists:foreach(
+		fun(#pubsub_state{items = []}) -> ok;
+		   (#pubsub_state{items = Items}) -> del_items(NodeId, Items)
+	    end, States),
 	    {result, {default, broadcast}};
 	_ ->
 	    %% Entity is not owner
@@ -666,10 +668,18 @@ get_entity_subscriptions(Host, Owner) ->
     end,
     Reply = case catch ejabberd_odbc:sql_query_t(Query) of
 	{selected, ["node", "type", "nodeid", "jid", "subscriptions"], RItems} ->
-	    lists:map(fun({N, T, I, J, S}) ->
+	    lists:foldl(fun({N, T, I, J, S}, Acc) ->
 		Node = nodetree_tree_odbc:raw_to_node(Host, {N, "", T, I}),
-		{Node, decode_subscriptions(S), decode_jid(J)}
-	    end, RItems);
+		Jid = decode_jid(J),
+		case decode_subscriptions(S) of
+		    [] ->
+			[{Node, none, Jid}|Acc];
+		    Subs ->
+			lists:foldl(fun({Sub, SubId}, Acc2) -> [{Node, Sub, SubId, Jid}|Acc2];
+				       (Sub, Acc2) -> [{Node, Sub, Jid}|Acc2]
+			end, Acc, Subs)
+		end
+	    end, [], RItems);
 	_ ->
 	    []
 	end,
@@ -702,10 +712,18 @@ get_entity_subscriptions_for_send_last(Host, Owner) ->
     end,
     Reply = case catch ejabberd_odbc:sql_query_t(Query) of
 	{selected, ["node", "type", "nodeid", "jid", "subscriptions"], RItems} ->
-	    lists:map(fun({N, T, I, J, S}) ->
+	    lists:foldl(fun({N, T, I, J, S}, Acc) ->
 		Node = nodetree_tree_odbc:raw_to_node(Host, {N, "", T, I}),
-		{Node, decode_subscriptions(S), decode_jid(J)}
-	    end, RItems);
+		Jid = decode_jid(J),
+		case decode_subscriptions(S) of
+		    [] ->
+			[{Node, none, Jid}|Acc];
+		    Subs ->
+			lists:foldl(fun({Sub, SubId}, Acc2) -> [{Node, Sub, SubId, Jid}|Acc2];
+				       (Sub, Acc2) -> [{Node, Sub, Jid}|Acc2]
+			end, Acc, Subs)
+		end
+	    end, [], RItems);
 	_ ->
 	    []
 	end,
@@ -717,8 +735,17 @@ get_node_subscriptions(NodeId) ->
 		  "from pubsub_state "
 		  "where nodeid='", NodeId, "';"]) of
 	    {selected, ["jid", "subscriptions"], RItems} ->
-		lists:map(fun({J, S}) -> {decode_jid(J), decode_subscriptions(S)} end, RItems);
-    % TODO {J, S, SubId}
+		lists:foldl(fun({J, S}, Acc) ->
+		    Jid = decode_jid(J),
+		    case decode_subscriptions(S) of
+			[] ->
+			    [{Jid, none}|Acc];
+			Subs ->
+			    lists:foldl(fun({Sub, SubId}, Acc2) -> [{Jid, Sub, SubId}|Acc2];
+					   (Sub, Acc2) -> [{Jid, Sub}|Acc2]
+			    end, Acc, Subs)
+		    end
+		end, [], RItems);
 	    _ ->
 		[]
     end,
@@ -731,7 +758,7 @@ get_subscriptions(NodeId, Owner) ->
 		 ["select subscriptions from pubsub_state "
 		  "where nodeid='", NodeId, "' and jid='", J, "';"]) of
 	{selected, ["subscriptions"], [{S}]} -> decode_subscriptions(S);
-	_ -> none
+	_ -> []
     end,
     {result, Reply}.
 
@@ -740,7 +767,10 @@ set_subscriptions(NodeId, Owner, Subscription, SubId) ->
     SubState = get_state_without_itemids(NodeId, SubKey),
     case {SubId, SubState#pubsub_state.subscriptions} of
 	{_, []} ->
-	    {error, ?ERR_ITEM_NOT_FOUND};
+	    case Subscription of
+		none -> {error, ?ERR_EXTENDED(?ERR_BAD_REQUEST, "not-subscribed")};
+		_ -> new_subscription(NodeId, Owner, Subscription, SubState)
+	    end;
 	{"", [{_, SID}]} ->
 	    case Subscription of
 		none -> unsub_with_subid(NodeId, SID, SubState);
@@ -764,6 +794,16 @@ replace_subscription(_, [], Acc) ->
     Acc;
 replace_subscription({Sub, SubId}, [{_, SubID} | T], Acc) ->
     replace_subscription({Sub, SubId}, T, [{Sub, SubID} | Acc]).
+
+new_subscription(NodeId, Owner, Subscription, SubState) ->
+    case pubsub_subscription_odbc:subscribe_node(Owner, NodeId, []) of
+	{result, SubId} ->
+	    Subscriptions = SubState#pubsub_state.subscriptions,
+	    set_state(SubState#pubsub_state{subscriptions = [{Subscription, SubId} | Subscriptions]}),
+	    {Subscription, SubId};
+	_ ->
+	    {error, ?ERR_INTERNAL_SERVER_ERROR}
+    end.
 
 unsub_with_subid(NodeId, SubId, SubState) ->
     pubsub_subscription_odbc:unsubscribe_node(SubState#pubsub_state.stateid,
@@ -790,7 +830,7 @@ get_pending_nodes(Host, Owner) ->
 					       affiliation = owner,
 					       _           = '_'}),
     NodeIDs = [ID || #pubsub_state{stateid = {_, ID}} <- States],
-    NodeTree = case ets:lookup(gen_mod:get_module_proc(Host, config), nodetree) of
+    NodeTree = case catch ets:lookup(gen_mod:get_module_proc(Host, config), nodetree) of
 		    [{nodetree, N}] -> N;
 		    _               -> nodetree_tree_odbc
 	       end,
@@ -942,7 +982,17 @@ get_items(NodeId, _From) ->
 	{result, []}
     end.
 get_items(NodeId, From, none) ->
-    get_items(NodeId, From, #rsm_in{max=?MAXITEMS div 2});
+    MaxItems = case catch ejabberd_odbc:sql_query_t(
+	["select val from pubsub_node_option "
+	 "where nodeid='", NodeId, "' "
+	 "and name='max_items';"]) of
+    {selected, ["val"], [{Value}]} ->
+	Tokens = element(2, erl_scan:string(Value++".")),
+	element(2, erl_parse:parse_term(Tokens));
+    _ ->
+	?MAXITEMS
+    end,
+    get_items(NodeId, From, #rsm_in{max=MaxItems});
 get_items(NodeId, _From, #rsm_in{max=M, direction=Direction, id=I, index=IncIndex})->
 	Max =  ?PUBSUB:escape(i2l(M)),
 	
@@ -1034,7 +1084,7 @@ get_items(NodeId, JID, AccessModel, PresenceSubscription, RosterGroup, _SubId, R
 	(AccessModel == whitelist) and (not Whitelisted) ->
 	    %% Node has whitelist access model and entity lacks required affiliation
 	    {error, ?ERR_EXTENDED(?ERR_NOT_ALLOWED, "closed-node")};
-	(AccessModel == authorize) -> % TODO: to be done
+	(AccessModel == authorize) and (not Whitelisted) ->
 	    %% Node has authorize access model
 	    {error, ?ERR_FORBIDDEN};
 	%%MustPay ->
@@ -1097,7 +1147,7 @@ get_item(NodeId, ItemId, JID, AccessModel, PresenceSubscription, RosterGroup, _S
 	(AccessModel == whitelist) and (not Whitelisted) ->
 	    %% Node has whitelist access model and entity lacks required affiliation
 	    {error, ?ERR_EXTENDED(?ERR_NOT_ALLOWED, "closed-node")};
-	(AccessModel == authorize) -> % TODO: to be done
+	(AccessModel == authorize) and (not Whitelisted) ->
 	    %% Node has authorize access model
 	    {error, ?ERR_FORBIDDEN};
 	%%MustPay ->
@@ -1161,6 +1211,14 @@ del_items(NodeId, ItemIds) ->
 get_item_name(_Host, _Node, Id) ->
     Id.
 
+node_to_path(Node) ->
+    string:tokens(binary_to_list(Node), "/").
+
+path_to_node([]) ->
+    <<>>;
+path_to_node(Path) ->
+    list_to_binary(string:join([""|Path], "/")).
+
 %% @spec (Affiliation, Subscription) -> true | false
 %%       Affiliation = owner | member | publisher | outcast | none
 %%       Subscription = subscribed | none
@@ -1210,7 +1268,7 @@ select_affiliation_subscriptions(NodeId, JID) ->
 	{selected, ["affiliation", "subscriptions"], [{A, S}]} ->
 	    {decode_affiliation(A), decode_subscriptions(S)};
 	_ ->
-	    {none, none}
+	    {none, []}
     end.
 select_affiliation_subscriptions(NodeId, JID, JID) ->
     select_affiliation_subscriptions(NodeId, JID);
@@ -1255,6 +1313,7 @@ decode_node(N) -> ?PUBSUB:string_to_node(N).
 
 decode_affiliation("o") -> owner;
 decode_affiliation("p") -> publisher;
+decode_affiliation("m") -> member;
 decode_affiliation("c") -> outcast;
 decode_affiliation(_) -> none.
 
@@ -1274,6 +1333,7 @@ encode_jid(JID) -> ?PUBSUB:escape(jlib:jid_to_string(JID)).
 
 encode_affiliation(owner) -> "o";
 encode_affiliation(publisher) -> "p";
+encode_affiliation(member) -> "m";
 encode_affiliation(outcast) -> "c";
 encode_affiliation(_) -> "n".
 
@@ -1310,12 +1370,12 @@ raw_to_item(NodeId, {ItemId, SJID, Creation, Modification, XML}) ->
 		 modification={ToTime(Modification), JID},
 		 payload = Payload}.
 
-l2i(L) when list(L) -> list_to_integer(L);
-l2i(I) when integer(I) -> I.
-i2l(I) when integer(I) -> integer_to_list(I);
-i2l(L) when list(L)    -> L.
-i2l(I, N) when integer(I) -> i2l(i2l(I), N);
-i2l(L, N) when list(L) ->
+l2i(L) when is_list(L) -> list_to_integer(L);
+l2i(I) when is_integer(I) -> I.
+i2l(I) when is_integer(I) -> integer_to_list(I);
+i2l(L) when is_list(L)    -> L.
+i2l(I, N) when is_integer(I) -> i2l(i2l(I), N);
+i2l(L, N) when is_list(L) ->
     case length(L) of
 	N -> L;
 	C when C > N -> L;

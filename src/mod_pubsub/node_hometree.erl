@@ -75,7 +75,9 @@
 	 get_item/7,
 	 get_item/2,
 	 set_item/1,
-	 get_item_name/3
+	 get_item_name/3,
+	 node_to_path/1,
+	 path_to_node/1
 	]).
 -define(DOMAIN, "pubsub").
 -define(PREFIX, "item:").
@@ -147,11 +149,12 @@ options() ->
      {notify_delete, false},
      {notify_retract, true},
      {persist_items, true},
-     {max_items, ?MAXITEMS div 2},
+     {max_items, ?MAXITEMS},
      {subscribe, true},
      {access_model, open},
      {roster_groups_allowed, []},
      {publish_model, publishers},
+     {notification_type, headline},
      {max_payload_size, ?MAX_PAYLOAD_SIZE},
      {send_last_published_item, on_sub_and_presence},
      {deliver_notifications, true},
@@ -211,7 +214,7 @@ create_node_permission(Host, ServerHost, Node, _ParentNode, Owner, Access) ->
 	_ ->
 	    case acl:match_rule(ServerHost, Access, LOwner) of
 		allow ->
-		    case Node of
+		    case node_to_path(Node) of
 			["home", Server, User | _] -> true;
 			_ -> false
 		    end;
@@ -321,9 +324,6 @@ subscribe_node(NodeId, Sender, Subscriber, AccessModel,
 	(AccessModel == whitelist) and (not Whitelisted) ->
 	    %% Node has whitelist access model and entity lacks required affiliation
 	    {error, ?ERR_EXTENDED(?ERR_NOT_ALLOWED, "closed-node")};
-	(AccessModel == authorize) -> % TODO: to be done
-	    %% Node has authorize access model
-	    {error, ?ERR_FORBIDDEN};
 	%%MustPay ->
 	%%	% Payment is required for a subscription
 	%%	{error, ?ERR_PAYMENT_REQUIRED};
@@ -491,14 +491,15 @@ publish_item(NodeId, Publisher, PublishModel, MaxItems, ItemId, Payload) ->
 	true ->
 	    %% TODO: check creation, presence, roster
 	    if MaxItems > 0 ->
-		PubId = {now(), SubKey},
+		Now = now(),
+		PubId = {Now, SubKey},
 		Item = case get_item(NodeId, ItemId) of
 		       {result, OldItem} ->
 			   OldItem#pubsub_item{modification = PubId,
 					       payload = Payload};
 		       _ ->
 			   #pubsub_item{itemid = {ItemId, NodeId},
-					creation = {now(), GenKey},
+					creation = {Now, GenKey},
 					modification = PubId,
 					payload = Payload}
 		   end,
@@ -566,12 +567,30 @@ delete_item(NodeId, Publisher, PublishModel, ItemId) ->
 	    case lists:member(ItemId, Items) of
 		true ->
 		    del_item(NodeId, ItemId),
-		    NewItems = lists:delete(ItemId, Items),
-		    set_state(GenState#pubsub_state{items = NewItems}),
+		    set_state(GenState#pubsub_state{items = lists:delete(ItemId, Items)}),
 		    {result, {default, broadcast}};
 		false ->
-		    %% Non-existent node or item
-		    {error, ?ERR_ITEM_NOT_FOUND}
+		    case Affiliation of
+			owner ->
+			    %% Owner can delete other publishers items as well
+			    {result, States} = get_states(NodeId),
+			    lists:foldl(
+				fun(#pubsub_state{items = PI, affiliation = publisher} = S, Res) ->
+				    case lists:member(ItemId, PI) of
+					true ->
+					    del_item(NodeId, ItemId),
+					    set_state(S#pubsub_state{items = lists:delete(ItemId, PI)}),
+					    {result, {default, broadcast}};
+					false ->
+					    Res
+				    end;
+				   (_, Res) ->
+				    Res
+			    end, {error, ?ERR_ITEM_NOT_FOUND}, States);
+			_ ->
+			    %% Non-existent node or item
+			    {error, ?ERR_ITEM_NOT_FOUND}
+		    end
 	    end
     end.
 
@@ -585,9 +604,15 @@ purge_node(NodeId, Owner) ->
     GenKey = jlib:jid_remove_resource(SubKey),
     GenState = get_state(NodeId, GenKey),
     case GenState of
-	#pubsub_state{items = Items, affiliation = owner} ->
-	    del_items(NodeId, Items),
-	    set_state(GenState#pubsub_state{items = []}),
+	#pubsub_state{affiliation = owner} ->
+	    {result, States} = get_states(NodeId),
+	    lists:foreach(
+		fun(#pubsub_state{items = []}) ->
+		    ok;
+		   (#pubsub_state{items = Items} = S) ->
+		    del_items(NodeId, Items),
+		    set_state(S#pubsub_state{items = []})
+	    end, States),
 	    {result, {default, broadcast}};
 	_ ->
 	    %% Entity is not owner
@@ -934,7 +959,7 @@ get_items(NodeId, JID, AccessModel, PresenceSubscription, RosterGroup, _SubId) -
 	(AccessModel == whitelist) and (not Whitelisted) ->
 	    %% Node has whitelist access model and entity lacks required affiliation
 	    {error, ?ERR_EXTENDED(?ERR_NOT_ALLOWED, "closed-node")};
-	(AccessModel == authorize) -> % TODO: to be done
+	(AccessModel == authorize) and (not Whitelisted) ->
 	    %% Node has authorize access model
 	    {error, ?ERR_FORBIDDEN};
 	%%MustPay ->
@@ -990,7 +1015,7 @@ get_item(NodeId, ItemId, JID, AccessModel, PresenceSubscription, RosterGroup, _S
 	(AccessModel == whitelist) and (not Whitelisted) ->
 	    %% Node has whitelist access model and entity lacks required affiliation
 	    {error, ?ERR_EXTENDED(?ERR_NOT_ALLOWED, "closed-node")};
-	(AccessModel == authorize) -> % TODO: to be done
+	(AccessModel == authorize) and (not Whitelisted) ->
 	    %% Node has authorize access model
 	    {error, ?ERR_FORBIDDEN};
 	%%MustPay ->
@@ -1029,6 +1054,14 @@ del_items(NodeId, ItemIds) ->
 %% node id.</p>
 get_item_name(_Host, _Node, Id) ->
     Id.
+
+node_to_path(Node) ->
+    string:tokens(binary_to_list(Node), "/").
+
+path_to_node([]) ->
+    <<>>;
+path_to_node(Path) ->
+    list_to_binary(string:join([""|Path], "/")).
 
 %% @spec (Affiliation, Subscription) -> true | false
 %%       Affiliation = owner | member | publisher | outcast | none
@@ -1093,3 +1126,4 @@ first_in_list(Pred, [H | T]) ->
 	true -> {value, H};
 	_    -> first_in_list(Pred, T)
     end.
+

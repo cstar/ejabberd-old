@@ -556,7 +556,7 @@ handle_event({service_message, Msg}, _StateName, StateData) ->
 		MessagePkt)
       end,
       ?DICT:to_list(StateData#state.users)),
-    NSD = add_message_to_history(
+    NSD = add_message_to_history("",
 				 StateData#state.jid,
 				 MessagePkt,
 				 StateData),
@@ -741,7 +741,7 @@ process_groupchat_message(From, {xmlelement, "message", Attrs, _Els} = Packet,
 			      end,
 			      ?DICT:to_list(StateData1#state.users)),
 			    NewStateData3 =
-				add_message_to_history(FromNick,
+				add_message_to_history(FromNick, From,
 						       Packet2,
 						       StateData1),
 			    {next_state, normal_state, NewStateData3};
@@ -771,7 +771,7 @@ process_groupchat_message(From, {xmlelement, "message", Attrs, _Els} = Packet,
 					        ok
 					 end
 				end,?DICT:to_list(StateData1#state.users)),
-			    StateData2 = add_message_to_history(FromNick,
+			    StateData2 = add_message_to_history(FromNick, From,
 				    Packet2,
 				    StateData1),
 			    {next_state, normal_state, StateData2};
@@ -1989,7 +1989,7 @@ send_new_presence(NJID, Reason, StateData) ->
 			   false ->
 			       []
 		       end,
-	      Packet = append_subtags(
+	      Packet = xml:append_subtags(
 			 Presence,
 			 [{xmlelement, "x", [{"xmlns", ?NS_MUC_USER}],
 			   [{xmlelement, "item", ItemAttrs, ItemEls} | Status]}]),
@@ -1997,7 +1997,7 @@ send_new_presence(NJID, Reason, StateData) ->
 		jlib:jid_replace_resource(StateData#state.jid, Nick),
 		Info#user.jid,
 		Packet)
-      end, ?DICT:to_list(StateData#state.users)).
+    end, ?DICT:to_list(StateData#state.users)).
 
 
 send_existing_presences(ToJID,StateData) ->
@@ -2026,7 +2026,7 @@ send_existing_presences(ToJID,StateData) ->
 				  [{"affiliation",atom_to_list(FromAffiliation) },
 				   {"role", atom_to_list(FromRole)}]
 			  end,
-		      Packet = append_subtags(
+		      Packet = xml:append_subtags(
 				 Presence,
 				 [{xmlelement, "x", [{"xmlns", ?NS_MUC_USER}],
 				   [{xmlelement, "item", ItemAttrs, []}]}]),
@@ -2037,11 +2037,6 @@ send_existing_presences(ToJID,StateData) ->
 			Packet)
 	      end
       end, ?DICT:to_list(StateData#state.users)).
-
-
-append_subtags({xmlelement, Name, Attrs, SubTags1}, SubTags2) ->
-    {xmlelement, Name, Attrs, SubTags1 ++ SubTags2}.
-
 
 now_to_usec({MSec, Sec, USec}) ->
     (MSec*1000000 + Sec)*1000000 + USec.
@@ -2101,7 +2096,7 @@ send_nick_changing(JID, OldNick, StateData) ->
 		   [{xmlelement, "x", [{"xmlns", ?NS_MUC_USER}],
 		     [{xmlelement, "item", ItemAttrs1, []},
 		      {xmlelement, "status", [{"code", "303"}], []}]}]},
-	      Packet2 = append_subtags(
+	      Packet2 = xml:append_subtags(
 			  Presence,
 			  [{xmlelement, "x", [{"xmlns", ?NS_MUC_USER}],
 			    [{xmlelement, "item", ItemAttrs2, []}]}]),
@@ -2145,7 +2140,7 @@ lqueue_to_list(#lqueue{queue = Q1}) ->
     queue:to_list(Q1).
 
 
-add_message_to_history(FromNick, Packet, StateData) ->
+add_message_to_history(FromNick, From, Packet, StateData) ->
     HaveSubject = case xml:get_subtag(Packet, "subject") of
 		      false ->
 			  false;
@@ -2153,7 +2148,7 @@ add_message_to_history(FromNick, Packet, StateData) ->
 			  true
 		  end,
     TimeStamp = calendar:now_to_universal_time(now()),
-    TSPacket = append_subtags(Packet,
+    TSPacket = xml:append_subtags(Packet,
 			      [jlib:timestamp_to_xml(TimeStamp)]),
     SPacket = jlib:replace_from_to(
 		jlib:jid_replace_resource(StateData#state.jid, FromNick),
@@ -2252,6 +2247,7 @@ send_kickban_presence1(UJID, Reason, Code, Headers) ->
 		Info#user.jid,
 		Packet)
       end, ?DICT:to_list(Headers#headers.users)).
+
 
 destroy_room(DEl, #headers{}=Headers) ->
     destroy_room(DEl, headers_to_state(Headers));
@@ -2508,6 +2504,7 @@ add_to_log(Type, Data, StateData)
     	_ ->
 	    ok
     end;
+
 add_to_log(Type, Data, StateData) ->
     case handler_call(should_log, [], StateData) of
 	{result, true, _} ->

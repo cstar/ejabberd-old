@@ -32,7 +32,7 @@
 	 get_parentnodes_tree/3,
 	 get_subnodes/3,
 	 get_subnodes_tree/3,
-	 create_node/5,
+	 create_node/6,
 	 delete_node/2]).
 
 -include_lib("stdlib/include/qlc.hrl").
@@ -53,14 +53,12 @@
 %% API
 %%====================================================================
 init(Host, ServerHost, Opts) ->
-    nodetree_tree:init(Host, ServerHost, Opts),
-    mnesia:transaction(fun create_node/5,
-		       [Host, [], "default", service_jid(ServerHost), []]).
+    nodetree_tree:init(Host, ServerHost, Opts).
 
 terminate(Host, ServerHost) ->
     nodetree_tree:terminate(Host, ServerHost).
 
-create_node(Key, NodeID, Type, Owner, Options) ->
+create_node(Key, NodeID, Type, Owner, Options, Parents) ->
     OwnerJID = jlib:jid_tolower(jlib:jid_remove_resource(Owner)),
     case find_node(Key, NodeID) of
 	false ->
@@ -68,6 +66,7 @@ create_node(Key, NodeID, Type, Owner, Options) ->
 	    N = #pubsub_node{nodeid = oid(Key, NodeID),
 			     id = ID,
 			     type = Type,
+			     parents = Parents,
 			     owners = [OwnerJID],
 			     options = Options},
 	    case set_node(N) of
@@ -155,17 +154,22 @@ get_parentnodes_tree(Host, NodeID, _From) ->
 get_subnodes(Host, NodeID, _From) ->
     get_subnodes(Host, NodeID).
 
+get_subnodes(Host, <<>>) ->
+    get_subnodes_helper(Host, <<>>);
 get_subnodes(Host, NodeID) ->
     case find_node(Host, NodeID) of
 	false -> {error, ?ERR_ITEM_NOT_FOUND};
-	_ ->
-	    Q = qlc:q([Node || #pubsub_node{nodeid  = {NHost, _},
-					    parents = Parents} = Node <- mnesia:table(pubsub_node),
-			       Host == NHost,
-			       lists:member(NodeID, Parents)]),
-	    qlc:e(Q)
+	_ -> get_subnodes_helper(Host, NodeID)
     end.
 
+
+get_subnodes_helper(Host, NodeID) ->
+    Q = qlc:q([Node || #pubsub_node{nodeid  = {NHost, _},
+                                    parents = Parents} = Node <- mnesia:table(pubsub_node),
+                       Host == NHost,
+                       lists:member(NodeID, Parents)]),
+    qlc:e(Q).
+    
 get_subnodes_tree(Host, NodeID, From) ->
     Pred = fun (NID, #pubsub_node{parents = Parents}) ->
 		   lists:member(NID, Parents)
@@ -224,6 +228,8 @@ remove_config_parent(NodeID, [H | T], Acc) ->
 validate_parentage(_Key, _Owners, []) ->
     true;
 validate_parentage(Key, Owners, [[] | T]) ->
+    validate_parentage(Key, Owners, T);
+validate_parentage(Key, Owners, [<<>> | T]) ->
     validate_parentage(Key, Owners, T);
 validate_parentage(Key, Owners, [ParentID | T]) ->
     case find_node(Key, ParentID) of

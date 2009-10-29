@@ -75,10 +75,17 @@ socket_type() ->
 udp_recv(Sock, Addr, Port, Data, _Opts) ->
     case stun_codec:decode(Data) of
 	{ok, Msg, <<>>} ->
+<<<<<<< HEAD:src/stun/ejabberd_stun.erl
 	    ?DEBUG("got:~n~s", [stun_codec:pp(Msg)]),
 	    case process(Addr, Port, Msg) of
 		RespMsg when is_record(RespMsg, stun) ->
 		    ?DEBUG("sent:~n~s", [stun_codec:pp(RespMsg)]),
+=======
+	    ?DEBUG("got:~n~p", [Msg]),
+	    case process(Addr, Port, Msg) of
+		RespMsg when is_record(RespMsg, stun) ->
+		    ?DEBUG("sent:~n~p", [RespMsg]),
+>>>>>>> processone/ejabberd-2.1.x:src/stun/ejabberd_stun.erl
 		    Data1 = stun_codec:encode(RespMsg),
 		    gen_udp:send(Sock, Addr, Port, Data1);
 		_ ->
@@ -112,11 +119,19 @@ wait_for_tls(Event, State) ->
     {next_state, wait_for_tls, State}.
 
 session_established(Msg, State) when is_record(Msg, stun) ->
+<<<<<<< HEAD:src/stun/ejabberd_stun.erl
     ?DEBUG("got:~n~s", [stun_codec:pp(Msg)]),
     {Addr, Port} = State#state.peer,
     case process(Addr, Port, Msg) of
 	Resp when is_record(Resp, stun) ->
 	    ?DEBUG("sent:~n~s", [stun_codec:pp(Resp)]),
+=======
+    ?DEBUG("got:~n~p", [Msg]),
+    {Addr, Port} = State#state.peer,
+    case process(Addr, Port, Msg) of
+	Resp when is_record(Resp, stun) ->
+	    ?DEBUG("sent:~n~p", [Resp]),
+>>>>>>> processone/ejabberd-2.1.x:src/stun/ejabberd_stun.erl
 	    Data = stun_codec:encode(Resp),
 	    (State#state.sock_mod):send(State#state.sock, Data);
 	_ ->
@@ -197,7 +212,10 @@ process(Addr, Port, #stun{class = request, unsupported = []} = Msg) ->
 			      'MAPPED-ADDRESS' = {Addr, Port}};
 		new ->
 		    Resp#stun{class = response,
+<<<<<<< HEAD:src/stun/ejabberd_stun.erl
 			      'MAPPED-ADDRESS' = {Addr, Port},
+=======
+>>>>>>> processone/ejabberd-2.1.x:src/stun/ejabberd_stun.erl
 			      'XOR-MAPPED-ADDRESS' = {Addr, Port}}
 	    end;
        true ->

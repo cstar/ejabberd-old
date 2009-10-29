@@ -64,7 +64,9 @@
 	 get_item/7,
 	 get_item/2,
 	 set_item/1,
-	 get_item_name/3
+	 get_item_name/3,
+	 node_to_path/1,
+	 path_to_node/1
 	]).
 
 init(Host, ServerHost, Opts) ->
@@ -82,11 +84,12 @@ options() ->
      {notify_delete, false},
      {notify_retract, false},
      {persist_items, false},
-     {max_items, ?MAXITEMS div 2},
+     {max_items, ?MAXITEMS},
      {subscribe, true},
      {access_model, presence},
      {roster_groups_allowed, []},
      {publish_model, publishers},
+     {notification_type, headline},
      {max_payload_size, ?MAX_PAYLOAD_SIZE},
      {send_last_published_item, on_sub_and_presence},
      {deliver_notifications, true},
@@ -172,7 +175,7 @@ get_entity_affiliations(_Host, Owner) ->
     SubKey = jlib:jid_tolower(Owner),
     GenKey = jlib:jid_remove_resource(SubKey),
     States = mnesia:match_object(#pubsub_state{stateid = {GenKey, '_'}, _ = '_'}),
-    NodeTree = case ets:lookup(gen_mod:get_module_proc(D, config), nodetree) of
+    NodeTree = case catch ets:lookup(gen_mod:get_module_proc(D, config), nodetree) of
 	    [{nodetree, N}] -> N;
 	    _ -> nodetree_tree
 	end,
@@ -266,6 +269,12 @@ set_item(Item) ->
 
 get_item_name(Host, Node, Id) ->
     node_hometree:get_item_name(Host, Node, Id).
+
+node_to_path(Node) ->
+    node_flat:node_to_path(Node).
+
+path_to_node(Path) ->
+    node_flat:path_to_node(Path).
 
 
 %%%

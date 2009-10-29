@@ -27,7 +27,9 @@
 -module(ejabberd_service).
 -author('alexey@process-one.net').
 
--behaviour(gen_fsm).
+-define(GEN_FSM, p1_fsm).
+
+-behaviour(?GEN_FSM).
 
 %% External exports
 -export([start/2,
@@ -80,7 +82,11 @@
        ).
 
 -define(INVALID_HANDSHAKE_ERR,
-	"<stream:error>Invalid Handshake</stream:error>"
+	"<stream:error>"
+	"<not-authorized xmlns='urn:ietf:params:xml:ns:xmpp-streams'/>"
+	"<text xmlns='urn:ietf:params:xml:ns:xmpp-streams' xml:lang='en'>"
+	"Invalid Handshake</text>"
+	"</stream:error>"
 	"</stream:stream>"
        ).
 
@@ -96,7 +102,8 @@ start(SockData, Opts) ->
     supervisor:start_child(ejabberd_service_sup, [SockData, Opts]).
 
 start_link(SockData, Opts) ->
-    gen_fsm:start_link(ejabberd_service, [SockData, Opts], ?FSMOPTS).
+    ?GEN_FSM:start_link(ejabberd_service, [SockData, Opts],
+			fsm_limit_opts(Opts) ++ ?FSMOPTS).
 
 socket_type() ->
     xml_stream.
@@ -379,3 +386,16 @@ send_element(StateData, El) ->
 
 new_id() ->
     randoms:get_string().
+
+fsm_limit_opts(Opts) ->
+    case lists:keysearch(max_fsm_queue, 1, Opts) of
+	{value, {_, N}} when is_integer(N) ->
+	    [{max_queue, N}];
+	_ ->
+	    case ejabberd_config:get_local_option(max_fsm_queue) of
+		N when is_integer(N) ->
+		    [{max_queue, N}];
+		_ ->
+		    []
+	    end
+    end.

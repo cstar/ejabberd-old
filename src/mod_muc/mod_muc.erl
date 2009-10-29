@@ -308,7 +308,6 @@ handle_call({create, Room, From, Nick, Opts, Handler},
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
-
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -524,7 +523,7 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 	    end;
 	_ ->
 	    case mnesia:dirty_read(muc_online_room, {Room, Host}) of
-		[] ->		    
+		[] ->
 		    Type = xml:get_attr_s("type", Attrs),
 		    case {Name, Type} of
 		    {"iq", "get"}-> %% Special case for handling disco for non running rooms.
@@ -624,6 +623,14 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 	    end
     end.
 
+check_user_can_create_room(ServerHost, AccessCreate, From, RoomID) ->
+    case acl:match_rule(ServerHost, AccessCreate, From) of
+	allow ->
+	    (length(RoomID) =< gen_mod:get_module_opt(ServerHost, mod_muc,
+						      max_room_id, infinite));
+	_ ->
+	    false
+    end.
 
 
 register_room(Host, Room, Pid) ->
@@ -821,7 +828,7 @@ iq_set_register_info(Host, From, Nick, Lang) ->
 	{atomic, ok} ->
 	    {result, []};
 	{atomic, false} ->
-	    ErrText = "Specified nickname is already registered",
+	    ErrText = "That nickname is registered by another person",
 	    {error, ?ERRT_CONFLICT(Lang, ErrText)};
 	_ ->
 	    {error, ?ERR_INTERNAL_SERVER_ERROR}
@@ -910,7 +917,6 @@ clean_table_from_bad_node(Node, Host) ->
 
 update_tables(Host) ->
     update_muc_registered_table(Host).
-
 
 
 

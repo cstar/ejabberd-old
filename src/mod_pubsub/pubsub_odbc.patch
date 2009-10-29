@@ -1,15 +1,29 @@
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 --- mod_pubsub.erl	2009-07-31 16:53:48.000000000 +0200
 +++ mod_pubsub_odbc.erl	2009-07-31 17:07:00.000000000 +0200
 @@ -45,7 +45,7 @@
  %%% TODO
  %%% plugin: generate Reply (do not use broadcast atom anymore)
+=======
+--- mod_pubsub.erl	2009-10-27 14:53:27.000000000 +0100
++++ mod_pubsub_odbc.erl	2009-10-27 14:58:23.000000000 +0100
+@@ -42,7 +42,7 @@
+ %%% 6.2.3.1, 6.2.3.5, and 6.3. For information on subscription leases see
+ %%% XEP-0060 section 12.18.
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  
 --module(mod_pubsub).
 +-module(mod_pubsub_odbc).
  -author('christophe.romain@process-one.net').
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
  -version('1.12-06').
  
 @@ -57,9 +57,9 @@
+=======
+ -version('1.13-0').
+ 
+@@ -54,9 +54,9 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  -include("jlib.hrl").
  -include("pubsub.hrl").
  
@@ -22,17 +36,29 @@
  
  %% exports for hooks
  -export([presence_probe/3,
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -104,7 +104,8 @@
  	 string_to_subscription/1,
  	 string_to_affiliation/1,
  	 extended_error/2,
 -	 extended_error/3
 +	 extended_error/3,
+=======
+@@ -102,7 +102,7 @@
+ 	 string_to_affiliation/1,
+ 	 extended_error/2,
+ 	 extended_error/3,
+-	 rename_default_nodeplugin/0
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
 +	 escape/1
  	]).
  
  %% API and gen_server callbacks
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -123,7 +124,7 @@
+=======
+@@ -121,7 +121,7 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  -export([send_loop/1
  	]).
  
@@ -41,16 +67,238 @@
  -define(PLUGIN_PREFIX, "node_").
  -define(TREE_PREFIX, "nodetree_").
  
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -212,8 +213,6 @@
+=======
+@@ -215,8 +215,6 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  	    ok
      end,
      ejabberd_router:register_route(Host),
 -    update_node_database(Host, ServerHost),
 -    update_state_database(Host, ServerHost),
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
      init_nodes(Host, ServerHost),
      State = #state{host = Host,
  		server_host = ServerHost,
 @@ -456,17 +455,15 @@
+=======
+     init_nodes(Host, ServerHost, NodeTree, Plugins),
+     State = #state{host = Host,
+ 		server_host = ServerHost,
+@@ -269,207 +267,14 @@
+ 
+ init_nodes(Host, ServerHost, _NodeTree, Plugins) ->
+     %% TODO, this call should be done plugin side
+-    case lists:member("hometree", Plugins) of
++    case lists:member("hometree_odbc", Plugins) of
+     true ->
+-	create_node(Host, ServerHost, string_to_node("/home"), service_jid(Host), "hometree"),
+-	create_node(Host, ServerHost, string_to_node("/home/"++ServerHost), service_jid(Host), "hometree");
++	create_node(Host, ServerHost, string_to_node("/home"), service_jid(Host), "hometree_odbc"),
++	create_node(Host, ServerHost, string_to_node("/home/"++ServerHost), service_jid(Host), "hometree_odbc");
+     false ->
+ 	ok
+     end.
+ 
+-update_node_database(Host, ServerHost) ->
+-    mnesia:del_table_index(pubsub_node, type),
+-    mnesia:del_table_index(pubsub_node, parentid),
+-    case catch mnesia:table_info(pubsub_node, attributes) of
+-	[host_node, host_parent, info] ->
+-	    ?INFO_MSG("upgrade node pubsub tables",[]),
+-	    F = fun() ->
+-			{Result, LastIdx} = lists:foldl(
+-			  fun({pubsub_node, NodeId, ParentId, {nodeinfo, Items, Options, Entities}}, {RecList, NodeIdx}) ->
+-				  ItemsList =
+-				      lists:foldl(
+-					fun({item, IID, Publisher, Payload}, Acc) ->
+-						C = {unknown, Publisher},
+-						M = {now(), Publisher},
+-						mnesia:write(
+-						  #pubsub_item{itemid = {IID, NodeIdx},
+-							       creation = C,
+-							       modification = M,
+-							       payload = Payload}),
+-						[{Publisher, IID} | Acc]
+-					end, [], Items),
+-				  Owners =
+-				      dict:fold(
+-					fun(JID, {entity, Aff, Sub}, Acc) ->
+-						UsrItems =
+-						    lists:foldl(
+-						      fun({P, I}, IAcc) ->
+-							      case P of
+-								  JID -> [I | IAcc];
+-								  _ -> IAcc
+-							      end
+-						      end, [], ItemsList),
+-						mnesia:write({pubsub_state,
+-							      {JID, NodeIdx},
+-							      UsrItems,
+-							      Aff,
+-							      Sub}),
+-						case Aff of
+-						    owner -> [JID | Acc];
+-						    _ -> Acc
+-						end
+-					end, [], Entities),
+-				  mnesia:delete({pubsub_node, NodeId}),
+-				  {[#pubsub_node{nodeid = NodeId,
+-						id = NodeIdx,
+-						parents = [element(2, ParentId)],
+-						owners = Owners,
+-						options = Options} |
+-				   RecList], NodeIdx + 1}
+-			  end, {[], 1},
+-			  mnesia:match_object(
+-			    {pubsub_node, {Host, '_'}, '_', '_'})),
+-			mnesia:write(#pubsub_index{index = node, last = LastIdx, free = []}),
+-			Result
+-		end,
+-	    {atomic, NewRecords} = mnesia:transaction(F),
+-	    {atomic, ok} = mnesia:delete_table(pubsub_node),
+-	    {atomic, ok} = mnesia:create_table(pubsub_node,
+-					       [{disc_copies, [node()]},
+-						{attributes, record_info(fields, pubsub_node)}]),
+-	    FNew = fun() -> lists:foreach(fun(Record) ->
+-						  mnesia:write(Record)
+-					  end, NewRecords)
+-		   end,
+-	    case mnesia:transaction(FNew) of
+-		{atomic, Result} ->
+-		    ?INFO_MSG("Pubsub node tables updated correctly: ~p", [Result]);
+-		{aborted, Reason} ->
+-		    ?ERROR_MSG("Problem updating Pubsub node tables:~n~p", [Reason])
+-	    end;
+-	[nodeid, parentid, type, owners, options] ->
+-	    F = fun({pubsub_node, NodeId, {_, Parent}, Type, Owners, Options}) ->
+-		    #pubsub_node{
+-			nodeid = NodeId,
+-			id = 0,
+-			parents = [Parent],
+-			type = Type,
+-			owners = Owners,
+-			options = Options}
+-		end,
+-	    mnesia:transform_table(pubsub_node, F, [nodeid, id, parents, type, owners, options]),
+-	    FNew = fun() ->
+-		LastIdx = lists:foldl(fun(#pubsub_node{nodeid = NodeId} = PubsubNode, NodeIdx) ->
+-		    mnesia:write(PubsubNode#pubsub_node{id = NodeIdx}),
+-		    lists:foreach(fun(#pubsub_state{stateid = StateId} = State) ->
+-			{JID, _} = StateId,
+-			mnesia:delete({pubsub_state, StateId}),
+-			mnesia:write(State#pubsub_state{stateid = {JID, NodeIdx}})
+-		    end, mnesia:match_object(#pubsub_state{stateid = {'_', NodeId}, _ = '_'})),
+-		    lists:foreach(fun(#pubsub_item{itemid = ItemId} = Item) ->
+-			{IID, _} = ItemId,
+-			{M1, M2} = Item#pubsub_item.modification,
+-			{C1, C2} = Item#pubsub_item.creation,
+-			mnesia:delete({pubsub_item, ItemId}),
+-			mnesia:write(Item#pubsub_item{itemid = {IID, NodeIdx},
+-						    modification = {M2, M1},
+-						    creation = {C2, C1}})
+-		    end, mnesia:match_object(#pubsub_item{itemid = {'_', NodeId}, _ = '_'})),
+-		    NodeIdx + 1
+-		end, 1, mnesia:match_object(
+-			{pubsub_node, {Host, '_'}, '_', '_', '_', '_', '_'})
+-		    ++  mnesia:match_object(
+-			{pubsub_node, {{'_', ServerHost, '_'}, '_'}, '_', '_', '_', '_', '_'})),
+-		mnesia:write(#pubsub_index{index = node, last = LastIdx, free = []})
+-		end,
+-	    case mnesia:transaction(FNew) of
+-		{atomic, Result} ->
+-		    rename_default_nodeplugin(),
+-		    ?INFO_MSG("Pubsub node tables updated correctly: ~p", [Result]);
+-		{aborted, Reason} ->
+-		    ?ERROR_MSG("Problem updating Pubsub node tables:~n~p", [Reason])
+-	    end;
+-	[nodeid, id, parent, type, owners, options] ->
+-	    F = fun({pubsub_node, NodeId, Id, Parent, Type, Owners, Options}) ->
+-		    #pubsub_node{
+-			nodeid = NodeId,
+-			id = Id,
+-			parents = [Parent],
+-			type = Type,
+-			owners = Owners,
+-			options = Options}
+-		end,
+-	    mnesia:transform_table(pubsub_node, F, [nodeid, id, parents, type, owners, options]),
+-	    rename_default_nodeplugin();
+-	_ ->
+-	    ok
+-    end,
+-    mnesia:transaction(fun() ->
+-	case catch mnesia:first(pubsub_node) of
+-	{_, L} when is_list(L) ->
+-	    lists:foreach(
+-		fun({H, N}) when is_list(N) ->
+-		    [Node] = mnesia:read({pubsub_node, {H, N}}),
+-		    Type = Node#pubsub_node.type,
+-		    BN = element(2, node_call(Type, path_to_node, [N])),
+-		    BP = case [element(2, node_call(Type, path_to_node, [P])) || P <- Node#pubsub_node.parents] of
+-			[<<>>] -> [];
+-			Parents -> Parents
+-		    end,
+-		    mnesia:write(Node#pubsub_node{nodeid={H, BN}, parents=BP}),
+-		    mnesia:delete({pubsub_node, {H, N}});
+-		   (_) ->
+-		    ok
+-	    end, mnesia:all_keys(pubsub_node));
+-	_ ->
+-	    ok
+-	end
+-    end).
+-
+-rename_default_nodeplugin() ->
+-    lists:foreach(fun(Node) ->
+-	mnesia:dirty_write(Node#pubsub_node{type = "hometree"})
+-    end, mnesia:dirty_match_object(#pubsub_node{type = "default", _ = '_'})).
+-
+-update_state_database(_Host, _ServerHost) ->
+-    case catch mnesia:table_info(pubsub_state, attributes) of
+-	[stateid, items, affiliation, subscription] ->
+-	    ?INFO_MSG("upgrade state pubsub tables", []),
+-	    F = fun ({pubsub_state, {JID, NodeID}, Items, Aff, Sub}, Acc) ->
+-			Subs = case Sub of
+-				   none ->
+-				       [];
+-				   _ ->
+-				       {result, SubID} = pubsub_subscription:subscribe_node(JID, NodeID, []),
+-				       [{Sub, SubID}]
+-			       end,
+-			NewState = #pubsub_state{stateid       = {JID, NodeID},
+-						 items	 = Items,
+-						 affiliation   = Aff,
+-						 subscriptions = Subs},
+-			[NewState | Acc]
+-		end,
+-	    {atomic, NewRecs} = mnesia:transaction(fun mnesia:foldl/3,
+-						   [F, [], pubsub_state]),
+-	    {atomic, ok} = mnesia:delete_table(pubsub_state),
+-	    {atomic, ok} = mnesia:create_table(pubsub_state,
+-					       [{disc_copies, [node()]},
+-						{attributes, record_info(fields, pubsub_state)}]),
+-	    FNew = fun () ->
+-			   lists:foreach(fun mnesia:write/1, NewRecs)
+-		   end,
+-	    case mnesia:transaction(FNew) of
+-		{atomic, Result} ->
+-		    ?INFO_MSG("Pubsub state tables updated correctly: ~p",
+-			      [Result]);
+-		{aborted, Reason} ->
+-		    ?ERROR_MSG("Problem updating Pubsub state tables:~n~p",
+-			       [Reason])
+-	    end;
+-	_ ->
+-	    ok
+-    end.
+-
+ send_queue(State, Msg) ->
+     Pid = State#state.send_loop,
+     case is_process_alive(Pid) of
+@@ -492,17 +297,15 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  	%% for each node From is subscribed to
  	%% and if the node is so configured, send the last published item to From
  	lists:foreach(fun(PType) ->
@@ -62,14 +310,22 @@
  	    lists:foreach(
  		fun({Node, subscribed, _, SubJID}) -> 
  		    if (SubJID == LJID) or (SubJID == BJID) ->
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 -			#pubsub_node{options = Options, type = Type, id = NodeId} = Node,
 -			case get_option(Options, send_last_published_item) of
 -			    on_sub_and_presence ->
 -				send_items(Host, Node, NodeId, Type, SubJID, last);
+=======
+-			#pubsub_node{nodeid = {H, N}, type = Type, id = NodeId, options = Options} = Node,
+-			case get_option(Options, send_last_published_item) of
+-			    on_sub_and_presence ->
+-				send_items(H, N, NodeId, Type, LJID, last);
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
 -			    _ ->
 -				ok
 -			end;
 +			#pubsub_node{nodeid = {H, N}, type = Type, id = NodeId} = Node,
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 +			send_items(H, N, NodeId, Type, SubJID, last);
  		    true ->
  			% resource not concerned about that subscription
@@ -88,6 +344,26 @@
  				node_action(Host, Type, unsubscribe_node, [NodeId, Subscriber, JID, all]);
  			    false ->
 @@ -906,7 +903,8 @@
+=======
++			send_items(H, N, NodeId, Type, LJID, last);
+ 		    true ->
+ 			% resource not concerned about that subscription
+ 			ok
+@@ -825,10 +628,10 @@
+ 	    {result, Subscriptions} = node_action(Host, PType, get_entity_subscriptions, [Host, Subscriber]),
+ 	    lists:foreach(fun
+ 		({Node, subscribed, _, JID}) ->
+-		    #pubsub_node{options = Options, owners = Owners, type = Type, id = NodeId} = Node,
++		    #pubsub_node{options = Options, type = Type, id = NodeId} = Node,
+ 		    case get_option(Options, access_model) of
+ 			presence ->
+-			    case lists:member(BJID, Owners) of
++			    case lists:member(BJID, node_owners(Host, Type, NodeId)) of
+ 				true ->
+ 				    node_action(Host, Type, unsubscribe_node, [NodeId, Subscriber, JID, all]);
+ 				false ->
+@@ -943,7 +746,8 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  			    sub_el = SubEl} = IQ ->
  			    {xmlelement, _, QAttrs, _} = SubEl,
  			    Node = xml:get_attr_s("node", QAttrs),
@@ -97,7 +373,11 @@
  				      {result, IQRes} ->
  					  jlib:iq_to_xml(
  					    IQ#iq{type = result,
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -1011,7 +1009,7 @@
+=======
+@@ -1048,7 +852,7 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  				    [] ->
  					["leaf"]; %% No sub-nodes: it's a leaf node
  				    _ ->
@@ -106,7 +386,11 @@
  					    {result, []} -> ["collection"];
  					    {result, _} -> ["leaf", "collection"];
  					    _ -> []
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -1027,8 +1025,9 @@
+=======
+@@ -1064,8 +868,9 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  			    [];
  			true ->
  			    [{xmlelement, "feature", [{"var", ?NS_PUBSUB}], []} |
@@ -118,7 +402,11 @@
  				       end, features(Type))]
  		    end,
  		%% TODO: add meta-data info (spec section 5.4)
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -1056,14 +1055,15 @@
+=======
+@@ -1093,14 +898,15 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  		{xmlelement, "feature", [{"var", ?NS_DISCO_ITEMS}], []},
  		{xmlelement, "feature", [{"var", ?NS_PUBSUB}], []},
  		{xmlelement, "feature", [{"var", ?NS_VCARD}], []}] ++
@@ -134,6 +422,7 @@
  
 -iq_disco_items(Host, [], From) ->
 +iq_disco_items(Host, [], From, _RSM) ->
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
      {result, lists:map(
  	       fun(#pubsub_node{nodeid = {_, SubNode}}) ->
  		       SN = node_to_string(SubNode),
@@ -141,16 +430,35 @@
  					     {"node", SN},
  					     {"name", RN}], []}
  	       end, tree_action(Host, get_subnodes, [Host, [], From]))};
+=======
+     case tree_action(Host, get_subnodes, [Host, <<>>, From]) of
+         Nodes when is_list(Nodes) ->
+             {result, lists:map(
+@@ -1112,7 +918,7 @@
+         Other ->
+             Other
+     end;
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
 -iq_disco_items(Host, Item, From) ->
 +iq_disco_items(Host, Item, From, RSM) ->
      case string:tokens(Item, "!") of
  	[_SNode, _ItemID] ->
  	    {result, []};
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -1085,9 +1085,9 @@
  	    %% TODO That is, remove name attribute (or node?, please check for 2.1)
  	    Action =
  		fun(#pubsub_node{type = Type, id = NodeId}) ->
 -			NodeItems = case node_call(Type, get_items, [NodeId, From]) of
+=======
+@@ -1120,10 +926,10 @@
+ 	    Node = string_to_node(SNode),
+ 	    Action =
+ 		fun(#pubsub_node{type = Type, id = NodeId}) ->
+-			% TODO call get_items/6 instead for access control (EJAB-1033)
+-			NodeItems = case node_call(Type, get_items, [NodeId, From]) of
++			%% TODO call get_items/6 instead for access control (EJAB-1033)
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
 +			{NodeItems, RsmOut} = case node_call(Type, get_items, [NodeId, From, RSM]) of
  					{result, I} -> I;
 -					_ -> []
@@ -158,16 +466,26 @@
  				    end,
  			Nodes = lists:map(
  				  fun(#pubsub_node{nodeid = {_, SubNode}}) ->
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -1103,7 +1103,7 @@
  					  {xmlelement, "item", [{"jid", Host}, {"node", SN},
  								{"name", Name}], []}
+=======
+@@ -1136,7 +942,7 @@
+ 				      {result, Name} = node_call(Type, get_item_name, [Host, Node, RN]),
+ 				      {xmlelement, "item", [{"jid", Host}, {"name", Name}], []}
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  				  end, NodeItems),
 -			{result, Nodes ++ Items}
 +			{result, Nodes ++ Items ++ jlib:rsm_encode(RsmOut)}
  		end,
  	    case transaction(Host, Node, Action, sync_dirty) of
  		{result, {_, Result}} -> {result, Result};
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -1235,7 +1235,8 @@
+=======
+@@ -1265,7 +1071,8 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  			(_, Acc) ->
  			    Acc
  			end, [], xml:remove_cdata(Els)),
@@ -177,11 +495,16 @@
  		{get, "subscriptions"} ->
  		    get_subscriptions(Host, Node, From, Plugins);
  		{get, "affiliations"} ->
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -1258,7 +1259,10 @@
+=======
+@@ -1288,7 +1095,9 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  
  iq_pubsub_owner(Host, ServerHost, From, IQType, SubEl, Lang) ->
      {xmlelement, _, _, SubEls} = SubEl,
 -    Action = xml:remove_cdata(SubEls),
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 +    NoRSM = lists:filter(fun({xmlelement, Name, _, _}) ->
 +			    Name == "set"
 +			end, SubEls),
@@ -190,6 +513,15 @@
  	[{xmlelement, Name, Attrs, Els}] ->
  	    Node = case Host of
 @@ -1384,7 +1388,8 @@
+=======
++    Action = lists:filter(fun({xmlelement, "set", _, _}) -> false;
++			    (_) -> true
++			end, xml:remove_cdata(SubEls)),
+     case Action of
+ 	[{xmlelement, Name, Attrs, Els}] ->
+ 	    Node = string_to_node(xml:get_attr_s("node", Attrs)),
+@@ -1411,7 +1220,8 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  		    _	       -> []
  		end
  	end,
@@ -199,7 +531,11 @@
  		     sync_dirty) of
  	{result, Res} -> Res;
  	Err	   -> Err
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -1428,7 +1433,7 @@
+=======
+@@ -1451,7 +1261,7 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  
  %%% authorization handling
  
@@ -208,7 +544,11 @@
      Lang = "en", %% TODO fix
      Stanza = {xmlelement, "message",
  	      [],
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -1457,7 +1462,7 @@
+=======
+@@ -1480,7 +1290,7 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  		  [{xmlelement, "value", [], [{xmlcdata, "false"}]}]}]}]},
      lists:foreach(fun(Owner) ->
  	ejabberd_router ! {route, service_jid(Host), jlib:make_jid(Owner), Stanza}
@@ -217,7 +557,11 @@
  
  find_authorization_response(Packet) ->
      {xmlelement, _Name, _Attrs, Els} = Packet,
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -1524,8 +1529,8 @@
+=======
+@@ -1544,8 +1354,8 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  			"true" -> true;
  			_ -> false
  		    end,
@@ -228,7 +572,11 @@
  			     {result, Subscriptions} = node_call(Type, get_subscriptions, [NodeId, Subscriber]),
  			     if
  				 not IsApprover ->
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -1711,7 +1716,7 @@
+=======
+@@ -1736,7 +1546,7 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  	    Reply = [{xmlelement, "pubsub", [{"xmlns", ?NS_PUBSUB}],
  		      [{xmlelement, "create", nodeAttr(Node),
  			[]}]}],
@@ -237,7 +585,20 @@
  		{result, {Result, broadcast}} ->
  		    %%Lang = "en", %% TODO: fix
  		    %%OwnerKey = jlib:jid_tolower(jlib:jid_remove_resource(Owner)),
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -1823,7 +1828,7 @@
+=======
+@@ -1844,7 +1654,7 @@
+ %%<li>The node does not exist.</li>
+ %%</ul>
+ subscribe_node(Host, Node, From, JID, Configuration) ->
+-    SubOpts = case pubsub_subscription:parse_options_xform(Configuration) of
++    SubOpts = case pubsub_subscription_odbc:parse_options_xform(Configuration) of
+ 	{result, GoodSubOpts} -> GoodSubOpts;
+ 	_ -> invalid
+     end,
+@@ -1852,7 +1662,7 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  		     error -> {"", "", ""};
  		     J -> jlib:jid_tolower(J)
  		 end,
@@ -246,7 +607,11 @@
  		    Features = features(Type),
  		    SubscribeFeature = lists:member("subscribe", Features),
  		    OptionsFeature = lists:member("subscription-options", Features),
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -1842,9 +1847,13 @@
+=======
+@@ -1871,9 +1681,13 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  				    {"", "", ""} ->
  					{false, false};
  				    _ ->
@@ -263,7 +628,11 @@
  				end
  			end,
  		    if
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -2167,7 +2176,7 @@
+=======
+@@ -2204,7 +2018,7 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  %% <p>The permission are not checked in this function.</p>
  %% @todo We probably need to check that the user doing the query has the right
  %% to read the items.
@@ -271,8 +640,13 @@
 +get_items(Host, Node, From, SubId, SMaxItems, ItemIDs, RSM) ->
      MaxItems =
  	if
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
  	    SMaxItems == "" -> ?MAXITEMS;
 @@ -2206,11 +2215,11 @@
+=======
+ 	    SMaxItems == "" -> get_max_items_node(Host);
+@@ -2243,11 +2057,11 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  			     node_call(Type, get_items,
  				       [NodeId, From,
  					AccessModel, PresenceSubscription, RosterGroup,
@@ -286,7 +660,11 @@
  		    SendItems = case ItemIDs of
  			[] -> 
  			    Items;
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -2223,7 +2232,8 @@
+=======
+@@ -2260,7 +2074,8 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  		    %% number of items sent to MaxItems:
  		    {result, [{xmlelement, "pubsub", [{"xmlns", ?NS_PUBSUB}],
  				[{xmlelement, "items", nodeAttr(Node),
@@ -296,7 +674,11 @@
  		Error ->
  		    Error
  	    end
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -2255,15 +2265,22 @@
+=======
+@@ -2292,16 +2107,27 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  %% @doc <p>Resend the items of a node to the user.</p>
  %% @todo use cache-last-item feature
  send_items(Host, Node, NodeId, Type, LJID, last) ->
@@ -305,6 +687,7 @@
  	undefined ->
 -	    send_items(Host, Node, NodeId, Type, LJID, 1);
 +	    % special ODBC optimization, works only with node_hometree_odbc, node_flat_odbc and node_pep_odbc
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 +	    ToSend = case node_action(Host, Type, get_last_items, [NodeId, LJID, 1]) of
 +		{result, []} -> [];
 +		{result, Items} -> Items
@@ -320,12 +703,38 @@
 -	    ejabberd_router ! {route, service_jid(Host), jlib:make_jid(LJID), Stanza}
 -    end;
 +		itemsEls([LastItem])}])
+=======
++	    case node_action(Host, Type, get_last_items, [NodeId, LJID, 1]) of
++		{result, [LastItem]} ->
++		    {ModifNow, ModifLjid} = LastItem#pubsub_item.modification,
++		    event_stanza_with_delay(
++			[{xmlelement, "items", nodeAttr(Node),
++			  itemsEls([LastItem])}], ModifNow, ModifLjid);
++		_ ->
++		    event_stanza(
++			[{xmlelement, "items", nodeAttr(Node),
++			  itemsEls([])}])
++	    end;
+ 	LastItem ->
+ 	    {ModifNow, ModifLjid} = LastItem#pubsub_item.modification,
+-	    Stanza = event_stanza_with_delay(
++	    event_stanza_with_delay(
+ 		[{xmlelement, "items", nodeAttr(Node),
+-		  itemsEls([LastItem])}], ModifNow, ModifLjid),
+-	    ejabberd_router ! {route, service_jid(Host), jlib:make_jid(LJID), Stanza}
+-    end;
++		  itemsEls([LastItem])}], ModifNow, ModifLjid)
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
 +    end,
 +    ejabberd_router ! {route, service_jid(Host), jlib:make_jid(LJID), Stanza};
  send_items(Host, Node, NodeId, Type, LJID, Number) ->
      ToSend = case node_action(Host, Type, get_items, [NodeId, LJID]) of
  	{result, []} -> 
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -2381,29 +2398,12 @@
+=======
+@@ -2427,29 +2253,12 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  	error ->
  	    {error, ?ERR_BAD_REQUEST};
  	_ ->
@@ -358,6 +767,7 @@
  				    end, Entities),
  				{result, []};
  			    _ ->
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -2665,8 +2665,8 @@
  	error ->
  	    {error, ?ERR_BAD_REQUEST};
@@ -374,6 +784,77 @@
      end.
  
 +%% @spec (NodeId) -> [ljid()]
+=======
+@@ -2502,11 +2311,11 @@
+     end.
+ 
+ read_sub(Subscriber, Node, NodeID, SubID, Lang) ->
+-    case pubsub_subscription:get_subscription(Subscriber, NodeID, SubID) of
++    case pubsub_subscription_odbc:get_subscription(Subscriber, NodeID, SubID) of
+ 	{error, notfound} ->
+ 	    {error, extended_error(?ERR_NOT_ACCEPTABLE, "invalid-subid")};
+ 	{result, #pubsub_subscription{options = Options}} ->
+-	    {result, XdataEl} = pubsub_subscription:get_options_xform(Lang, Options),
++	    {result, XdataEl} = pubsub_subscription_odbc:get_options_xform(Lang, Options),
+ 	    OptionsEl = {xmlelement, "options", [{"jid", jlib:jid_to_string(Subscriber)},
+ 						 {"subid", SubID}|nodeAttr(Node)],
+ 			 [XdataEl]},
+@@ -2532,7 +2341,7 @@
+     end.
+ 
+ set_options_helper(Configuration, JID, NodeID, SubID, Type) ->
+-    SubOpts = case pubsub_subscription:parse_options_xform(Configuration) of
++    SubOpts = case pubsub_subscription_odbc:parse_options_xform(Configuration) of
+ 	{result, GoodSubOpts} -> GoodSubOpts;
+ 	_ -> invalid
+     end,
+@@ -2561,7 +2370,7 @@
+ write_sub(_Subscriber, _NodeID, _SubID, invalid) ->
+     {error, extended_error(?ERR_BAD_REQUEST, "invalid-options")};
+ write_sub(Subscriber, NodeID, SubID, Options) ->
+-    case pubsub_subscription:set_subscription(Subscriber, NodeID, SubID, Options) of
++    case pubsub_subscription_odbc:set_subscription(Subscriber, NodeID, SubID, Options) of
+ 	{error, notfound} ->
+ 	    {error, extended_error(?ERR_NOT_ACCEPTABLE, "invalid-subid")};
+ 	{result, _} ->
+@@ -2729,8 +2538,8 @@
+ 				     {"subscription", subscription_to_string(Sub)} | nodeAttr(Node)], []}]}]},
+ 		ejabberd_router ! {route, service_jid(Host), jlib:make_jid(JID), Stanza}
+ 	    end,
+-	    Action = fun(#pubsub_node{owners = Owners, type = Type, id = NodeId}) ->
+-			    case lists:member(Owner, Owners) of
++	    Action = fun(#pubsub_node{type = Type, id = NodeId}) ->
++			    case lists:member(Owner, node_owners_call(Type, NodeId)) of
+ 				true ->
+ 				    Result = lists:foldl(fun({JID, Subscription, SubId}, Acc) ->
+ 
+@@ -3014,7 +2823,7 @@
+ 			{Depth, [{N, get_node_subs(N)} || N <- Nodes]}
+ 	    end, tree_call(Host, get_parentnodes_tree, [Host, Node, service_jid(Host)]))}
+ 	end,
+-    case transaction(Action, sync_dirty) of
++    case transaction(Host, Action, sync_dirty) of
+ 	{result, CollSubs} -> CollSubs;
+ 	_ -> []
+     end.
+@@ -3028,9 +2837,9 @@
+ 
+ get_options_for_subs(NodeID, Subs) ->
+     lists:foldl(fun({JID, subscribed, SubID}, Acc) ->
+-			case pubsub_subscription:read_subscription(JID, NodeID, SubID) of
++			case pubsub_subscription_odbc:get_subscription(JID, NodeID, SubID) of
+ 			    {error, notfound} -> [{JID, SubID, []} | Acc];
+-			    #pubsub_subscription{options = Options} -> [{JID, SubID, Options} | Acc];
++			    {result, #pubsub_subscription{options = Options}} -> [{JID, SubID, Options} | Acc];
+ 			    _ -> Acc
+ 			end;
+ 		    (_, Acc) ->
+@@ -3228,6 +3037,30 @@
+ 	    Result
+     end.
+ 
++%% @spec (Host, Type, NodeId) -> [ljid()]
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
 +%%    NodeId = pubsubNodeId()
 +%% @doc <p>Return list of node owners.</p>
 +node_owners(Host, Type, NodeId) ->
@@ -397,10 +878,17 @@
 +	    []
 +    end.
 +
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
  %% @spec (Options) -> MaxItems
  %%	 Host = host()
  %%	 Options = [Option]
 @@ -3527,7 +3551,13 @@
+=======
+ %% @spec (Host, Options) -> MaxItems
+ %%	 Host = host()
+ %%	 Options = [Option]
+@@ -3614,7 +3447,13 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  tree_action(Host, Function, Args) ->
      ?DEBUG("tree_action ~p ~p ~p",[Host,Function,Args]),
      Fun = fun() -> tree_call(Host, Function, Args) end,
@@ -415,7 +903,11 @@
  
  %% @doc <p>node plugin call.</p>
  node_call(Type, Function, Args) ->
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -3547,13 +3577,13 @@
+=======
+@@ -3634,13 +3473,13 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  
  node_action(Host, Type, Function, Args) ->
      ?DEBUG("node_action ~p ~p ~p ~p",[Host,Type,Function,Args]),
@@ -431,7 +923,11 @@
  			case tree_call(Host, get_node, [Host, Node]) of
  			    N when is_record(N, pubsub_node) ->
  				case Action(N) of
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -3566,8 +3596,14 @@
+=======
+@@ -3653,8 +3492,14 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  			end
  		end, Trans).
  
@@ -448,7 +944,11 @@
  	{result, Result} -> {result, Result};
  	{error, Error} -> {error, Error};
  	{atomic, {result, Result}} -> {result, Result};
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -3575,6 +3611,15 @@
+=======
+@@ -3662,6 +3507,15 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  	{aborted, Reason} ->
  	    ?ERROR_MSG("transaction return internal error: ~p~n", [{aborted, Reason}]),
  	    {error, ?ERR_INTERNAL_SERVER_ERROR};
@@ -464,7 +964,11 @@
  	{'EXIT', Reason} ->
  	    ?ERROR_MSG("transaction return internal error: ~p~n", [{'EXIT', Reason}]),
  	    {error, ?ERR_INTERNAL_SERVER_ERROR};
+<<<<<<< HEAD:src/mod_pubsub/pubsub_odbc.patch
 @@ -3583,6 +3628,17 @@
+=======
+@@ -3670,6 +3524,17 @@
+>>>>>>> processone/ejabberd-2.1.x:src/mod_pubsub/pubsub_odbc.patch
  	    {error, ?ERR_INTERNAL_SERVER_ERROR}
      end.
  

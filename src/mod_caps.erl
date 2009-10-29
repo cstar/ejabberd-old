@@ -147,13 +147,8 @@ get_user_resources(LUser, LServer) ->
 %% information.  Host is the host that asks, From is the full JID that
 %% sent the caps packet, and Caps is what read_caps returned.
 note_caps(Host, From, Caps) ->
-    case Caps of
-	nothing -> 
-	    ok;
-	_ ->
-	    Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
-	    gen_server:cast(Proc, {note_caps, From, Caps})
-    end.
+    Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
+    gen_server:cast(Proc, {note_caps, From, Caps}).
 
 %% wait_caps should be called just before note_caps
 %% it allows to lock get_caps usage for code using presence_probe
@@ -316,6 +311,10 @@ handle_call({get_features, Caps}, From, State) ->
 handle_call(stop, _From, State) ->
     {stop, normal, ok, State}.
 
+handle_cast({note_caps, From, nothing}, State) ->
+    BJID = jid_to_binary(From),
+    catch mnesia:dirty_delete({user_caps, BJID}),
+    {noreply, State};
 handle_cast({note_caps, From, 
 	     #caps{node = Node, version = Version, exts = Exts} = Caps}, 
 	    #state{host = Host, disco_requests = Requests} = State) ->
@@ -362,7 +361,7 @@ handle_cast({note_caps, From,
 			  ejabberd_local:register_iq_response_handler
 			    (Host, ID, ?MODULE, handle_disco_response),
 			  ejabberd_router:route(jlib:make_jid("", Host, ""), From, Stanza),
-			  timer:send_after(?CAPS_QUERY_TIMEOUT, self(), {disco_timeout, ID}),
+			  timer:send_after(?CAPS_QUERY_TIMEOUT, self(), {disco_timeout, ID, BJID}),
 			  ?DICT:store(ID, node_to_binary(Node, SubNode), Dict)
 		  end, Requests, Missing),
 	    {noreply, State#state{disco_requests = NewRequests}}
@@ -409,10 +408,11 @@ handle_cast({disco_response, From, _To,
     end,
     NewRequests = ?DICT:erase(ID, Requests),
     {noreply, State#state{disco_requests = NewRequests}};
-handle_cast({disco_timeout, ID}, #state{host = Host, disco_requests = Requests} = State) ->
+handle_cast({disco_timeout, ID, BJID}, #state{host = Host, disco_requests = Requests} = State) ->
     %% do not wait a response anymore for this IQ, client certainly will never answer
     NewRequests = case ?DICT:is_key(ID, Requests) of
     true ->
+	catch mnesia:dirty_delete({user_caps, BJID}),
 	ejabberd_local:unregister_iq_response_handler(Host, ID),
 	?DICT:erase(ID, Requests);
     false ->

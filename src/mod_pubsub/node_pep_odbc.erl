@@ -70,7 +70,9 @@
 	 get_item/2,
 	 set_item/1,
 	 get_item_name/3,
-	 get_last_items/3
+	 get_last_items/3,
+	 node_to_path/1,
+	 path_to_node/1
 	]).
 
 init(Host, ServerHost, Opts) ->
@@ -90,11 +92,12 @@ options() ->
      {notify_delete, false},
      {notify_retract, false},
      {persist_items, false},
-     {max_items, ?MAXITEMS div 2},
+     {max_items, ?MAXITEMS},
      {subscribe, true},
      {access_model, presence},
      {roster_groups_allowed, []},
      {publish_model, publishers},
+     {notification_type, headline},
      {max_payload_size, ?MAX_PAYLOAD_SIZE},
      {send_last_published_item, on_sub_and_presence},
      {deliver_notifications, true},
@@ -196,24 +199,24 @@ get_entity_subscriptions(_Host, Owner) ->
     GJ = node_hometree_odbc:encode_jid(GenKey),
     Query = case SubKey of
 	GenKey ->
-	    ["select host, node, type, i.nodeid, jid, subscription "
+	    ["select host, node, type, i.nodeid, jid, subscriptions "
 	     "from pubsub_state i, pubsub_node n "
 	     "where i.nodeid = n.nodeid "
 	     "and jid like '", GJ, "%' "
 	     "and host like '%@", Host, "';"];
 	_ ->
-	    ["select host, node, type, i.nodeid, jid, subscription "
+	    ["select host, node, type, i.nodeid, jid, subscriptions "
 	     "from pubsub_state i, pubsub_node n "
 	     "where i.nodeid = n.nodeid "
 	     "and jid in ('", SJ, "', '", GJ, "') "
 	     "and host like '%@", Host, "';"]
     end,
     Reply = case catch ejabberd_odbc:sql_query_t(Query) of
-	{selected, ["host", "node", "type", "nodeid", "jid", "subscription"], RItems} ->
+	{selected, ["host", "node", "type", "nodeid", "jid", "subscriptions"], RItems} ->
 	    lists:map(fun({H, N, T, I, J, S}) ->
 		O = node_hometree_odbc:decode_jid(H),
 		Node = nodetree_odbc:raw_to_node(O, {N, "", T, I}),
-		{Node, node_hometree_odbc:decode_subscription(S), node_hometree_odbc:decode_jid(J)}
+		{Node, node_hometree_odbc:decode_subscriptions(S), node_hometree_odbc:decode_jid(J)}
 	    end, RItems);
 	_ ->
 	    []
@@ -228,14 +231,14 @@ get_entity_subscriptions_for_send_last(_Host, Owner) ->
     GJ = node_hometree_odbc:encode_jid(GenKey),
     Query = case SubKey of
 	GenKey ->
-	    ["select host, node, type, i.nodeid, jid, subscription "
+	    ["select host, node, type, i.nodeid, jid, subscriptions "
 	     "from pubsub_state i, pubsub_node n, pubsub_node_option o "
 	     "where i.nodeid = n.nodeid and n.nodeid = o.nodeid "
 	     "and name='send_last_published_item' and val='on_sub_and_presence' "
 	     "and jid like '", GJ, "%' "
 	     "and host like '%@", Host, "';"];
 	_ ->
-	    ["select host, node, type, i.nodeid, jid, subscription "
+	    ["select host, node, type, i.nodeid, jid, subscriptions "
 	     "from pubsub_state i, pubsub_node n, pubsub_node_option o "
 	     "where i.nodeid = n.nodeid and n.nodeid = o.nodeid "
 	     "and name='send_last_published_item' and val='on_sub_and_presence' "
@@ -243,11 +246,11 @@ get_entity_subscriptions_for_send_last(_Host, Owner) ->
 	     "and host like '%@", Host, "';"]
     end,
     Reply = case catch ejabberd_odbc:sql_query_t(Query) of
-	{selected, ["host", "node", "type", "nodeid", "jid", "subscription"], RItems} ->
+	{selected, ["host", "node", "type", "nodeid", "jid", "subscriptions"], RItems} ->
 	    lists:map(fun({H, N, T, I, J, S}) ->
 		O = node_hometree_odbc:decode_jid(H),
 		Node = nodetree_odbc:raw_to_node(O, {N, "", T, I}),
-		{Node, node_hometree_odbc:decode_subscription(S), node_hometree_odbc:decode_jid(J)}
+		{Node, node_hometree_odbc:decode_subscriptions(S), node_hometree_odbc:decode_jid(J)}
 	    end, RItems);
 	_ ->
 	    []
@@ -304,6 +307,11 @@ set_item(Item) ->
 get_item_name(Host, Node, Id) ->
     node_hometree_odbc:get_item_name(Host, Node, Id).
 
+node_to_path(Node) ->
+    node_flat_odbc:node_to_path(Node).
+
+path_to_node(Path) ->
+    node_flat_odbc:path_to_node(Path).
 
 %%%
 %%% Internal

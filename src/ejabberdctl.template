@@ -102,7 +102,7 @@ if [ "$EJABBERD_MSGS_PATH" = "" ]; then
 fi
 
 EJABBERD_LOG_PATH=$LOGS_DIR/ejabberd.log
-SASL_LOG_PATH=$LOGS_DIR/sasl.log
+SASL_LOG_PATH=$LOGS_DIR/erlang.log
 DATETIME=`date "+%Y%m%d-%H%M%S"`
 ERL_CRASH_DUMP=$LOGS_DIR/erl_crash_$DATETIME.dump
 ERL_INETRC=$ETCDIR/inetrc
@@ -118,6 +118,7 @@ export EJABBERD_LOG_PATH
 export EJABBERD_SO_PATH
 export EJABBERD_BIN_PATH
 export EJABBERD_DOC_PATH
+export EJABBERD_PID_PATH
 export ERL_CRASH_DUMP
 export ERL_INETRC
 export ERL_MAX_PORTS
@@ -239,9 +240,42 @@ usage ()
     exit
 }
 
+# stop epmd if there is no other running node
+stop_epmd()
+{
+    epmd -names | grep -q name || epmd -kill
+}
+
+# allow sync calls
+wait_for_status()
+{
+    # args: status try delay
+    # return: 0 OK, 1 KO
+    timeout=$2
+    status=4
+    while [ $status -ne $1 ]; do
+        sleep $3
+        let timeout=timeout-1
+        [ $timeout -eq 0 ] && {
+            status=$1
+        } || {
+            ctl status > /dev/null
+            status=$?
+        }
+    done
+    [ $timeout -eq 0 ] && {
+        status=1
+    } || {
+        status=0
+    }
+    return $status
+}
+
 case $ARGS in
     ' start') start;;
     ' debug') debug;;
     ' live') live;;
+    ' started') wait_for_status 0 30 2;; # wait 30x2s before timeout
+    ' stopped') wait_for_status 3 15 2; stop_epmd;; # wait 15x2s before timeout
     *) ctl $ARGS;;
 esac

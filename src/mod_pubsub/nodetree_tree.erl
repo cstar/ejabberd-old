@@ -56,7 +56,7 @@
 	 get_parentnodes_tree/3,
 	 get_subnodes/3,
 	 get_subnodes_tree/3,
-	 create_node/5,
+	 create_node/6,
 	 delete_node/2,
 	 make_key/1
 	]).
@@ -136,7 +136,7 @@ get_bucket(Host) when is_list(Host)->
     Bucket;
 get_bucket(Host)->
     ?ERROR_MSG("Unsupported host format : ~p", [Host]).
-    
+
 get_node(Host, Node, _From) ->
     get_node(Host, Node).
 
@@ -156,17 +156,15 @@ get_node(Host, Node) ->
 get_node({Host, Node}) ->
   get_node(Host, Node).
 
-get_nodes(Key, _From) ->
-    get_nodes(Key).
-
+get_nodes(Host, _From) ->
+    get_nodes(Host).
 
 %% @spec (Host) -> [pubsubNode()] | {error, Reason}
-%%     Key = mod_pubsub:host() | mod_pubsub:jid()
+%%     Host = mod_pubsub:host() | mod_pubsub:jid()
 get_nodes(Host) ->
     K=make_key({Host, []}),
     Nodes =  s3:get_objects(get_bucket(Host), [{prefix, K}]),
     lists:map(fun({_K, Bin, _H})-> binary_to_term(list_to_binary(Bin)) end, Nodes).
-
 
 %% @spec (Host, Node, From) -> [{Depth, Record}] | {error, Reason}
 %%     Host   = mod_pubsub:host() | mod_pubsub:jid()
@@ -189,7 +187,7 @@ get_parentnodes(_Host, _Node, _From) ->
 get_parentnodes_tree(Host, Node, From) ->
     case get_node(Host, Node, From) of
 	N when is_record(N, pubsub_node) -> [{0, [N]}];
-	Error -> Error
+	_Error -> []
     end.
 
 %% @spec (Host, Node, From) -> [pubsubNode()] | {error, Reason}
@@ -206,7 +204,7 @@ get_subnodes(Host, Node, _From) ->
     lists:map(fun({_K, Bin, _H})-> binary_to_term(list_to_binary(Bin)) end, Nodes).
 
 
-%% @spec (Host, Index) -> [pubsubNode()] | {error, Reason}
+%% @spec (Host, Index) -> [pubsubNodeIdx()] | {error, Reason}
 %%     Host = mod_pubsub:host()
 %%     Node = mod_pubsub:pubsubNode()
 get_subnodes_tree(Host, Node,_From) ->
@@ -228,7 +226,7 @@ get_subnodes_tree(Host, Node)->
 %%     NodeType = mod_pubsub:nodeType()
 %%     Owner = mod_pubsub:jid()
 %%     Options = list()
-create_node(Key, Node, Type, Owner, Options) ->
+create_node(Key, Node, Type, Owner, Options, Parents) ->
     BJID = jlib:jid_tolower(jlib:jid_remove_resource(Owner)),
     case get_node(Key, Node) of
 	{error, ?ERR_ITEM_NOT_FOUND} ->
@@ -239,14 +237,13 @@ create_node(Key, Node, Type, Owner, Options) ->
 			%% PEP does not uses hierarchy
 			{[], true};
 		    _ ->
-			case lists:sublist(Node, length(Node) - 1) of
-			[] -> 
-			    {[], true};
-			Parent ->
+			case Parents of
+			[] -> true;
+			[Parent|_] ->
 			    case get_node(Key, Parent) of
-				{error, ?ERR_ITEM_NOT_FOUND} -> {Parent, false};
-				#pubsub_node{owners = Owners} ->  {Parent, lists:member(BJID, Owners)};
-				_ -> {Parent, false}
+				{error, ?ERR_ITEM_NOT_FOUND} -> false;
+				#pubsub_node{owners = Owners} -> lists:member(BJID, Owners);
+				_ ->  false
 			    end
 			end
 		end,
@@ -256,7 +253,7 @@ create_node(Key, Node, Type, Owner, Options) ->
 		    %%{error, ?ERR_REGISTRATION_REQUIRED};
 		    %NodeId = pubsub_index:new(node),
 		    set_node(#pubsub_node{nodeid = {Key, Node},
-					      parents = [ParentNode],
+					      parents = Parents,
 					      id = {Key, Node},
 					      type = Type,
 					      owners = [BJID],
@@ -264,7 +261,7 @@ create_node(Key, Node, Type, Owner, Options) ->
 			{ok, {Key, Node}};
 		false ->
 		    %% Requesting entity is prohibited from creating nodes
-		    {error, ?ERR_PAYMENT_REQUIRED}
+		    {error, ?ERR_FORBIDDEN}
 	    end;
 	_ ->
 	    %% NodeID already exists
