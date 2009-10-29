@@ -104,6 +104,7 @@ init(PortIP, Module, RawOpts) ->
     SockOpts = lists:filter(fun({ip, _}) -> true;
 			       (inet6) -> true;
 			       (inet) -> true;
+			       ({backlog, _}) -> true;
 			       (_) -> false
 			    end, Opts),
     if Proto == udp ->
@@ -126,6 +127,10 @@ init_udp(PortIP, Module, Opts, SockOpts, Port, IPS) ->
     end.
 
 init_tcp(PortIP, Module, Opts, SockOpts, Port, IPS) ->
+    SockOpts2 = case erlang:system_info(otp_release) >= "R13B" of
+	true -> [{send_timeout_close, true} | SockOpts];
+	false -> []
+    end,
     Res = gen_tcp:listen(Port, [binary,
 				{packet, 0},
 				{active, false},
@@ -133,7 +138,7 @@ init_tcp(PortIP, Module, Opts, SockOpts, Port, IPS) ->
 				{nodelay, true},
 				{send_timeout, ?TCP_SEND_TIMEOUT},
 				{keepalive, true} |
-				SockOpts]),
+				SockOpts2]),
     case Res of
 	{ok, ListenSocket} ->
 	    %% Inform my parent that this port was opened succesfully

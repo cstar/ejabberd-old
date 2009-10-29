@@ -43,13 +43,16 @@
 
 * Configuration
 - Added option access_max_user_messages for mod_offline
+- Added option backlog for ejabberd_listener to increase TCP backlog
 - Added option define_macro and use_macro
 - Added option include_config_file to include additional configuration files
+- Added option max_fsm_queue
 - Added option outgoing_s2s_options to define IP address families and timeout
 - Added option registration_timeout to ejabberd.cfg.example
 - Added option s2s_dns_options to define DNS timeout and retries
 - Added option ERL_OPTIONS to ejabberdctl.cfg
 - Added option FIREWALL_WINDOW to ejabberdctl.cfg
+- Added option EJABBERD_PID_PATH to ejabberdctl.cfg
 - Deleted option user_max_messages of mod_offline
 - Check certfiles are readable on server start and listener start
 - Config file management mix file reading and sanity check
@@ -62,6 +65,7 @@
 - New syntax to specify the network protocol: tcp or udp
 - Report error at startup if a listener module isn't available
 - Only listen in a port when actually ready to serve requests
+- In default config, only local accounts can create rooms and PubSub nodes
 
 * Core architecture
 - More verbose error reporting for xml:element_to_string
@@ -72,6 +76,7 @@
 * Crypto
 - Do not ask certificate for client (c2s)
 - SSL code remove from ejabberd in favor of TLS
+- Support Zlib compression after STARTTLS encryption
 - tls v1 client hello
 
 * Documentation
@@ -86,6 +91,7 @@
 - ejabberdctl script now displays help and categorization of commands
 
 * HTTP Binding and HTTP Polling
+- HTTP-Bind: module optimization and clean-up
 - HTTP-Bind: allow configuration of max_inactivity timeout
 - HTTP-Poll: turn session timeout into a config file parameter
 
@@ -102,6 +108,8 @@
 * Localization
 - Use Gettext PO for translators, export to ejabberd MSG
 - Support translation files for additional projects
+- Most translations are updated to latest code
+- New translation to Greek language
 
 * Multi-User Chat (MUC)
 - Allow admins to send messages to rooms
@@ -127,6 +135,8 @@
 - Implicit item deletion is not notified when deleting node
 - Make PubSub x-data configuration form handles list value
 - Make default node name convention XEP-compatible, document usage of hierarchy
+- Node names are used verbatim, without separating by slash, unless a
+  node plugin uses its own separator
 - Send authorization update event (XEP-0060, 8.6)
 - Support of collection node subscription options
 - Support ODBC storage. Experimental, needs more testing.
@@ -147,6 +157,7 @@
   no need to use root account to.
 - Only try to install epam if pam was enabled in configure script
 - Spool, config and log dirs: owner writes, group reads, others do nothing.
+- Provides an example ejabberd.init file
 
 * S2S
 - Option to define s2s outgoing behaviour: IPv4, IPv6 and timeout
@@ -198,20 +209,33 @@
 
    Upgrading From ejabberd 2.0.x:
 
-- The database schemas didn't change since ejabberd 1.1.4.
-  Anyway, it is recommended to backup the Mnesia spool directory and
+- The database schemas have three changes since ejabberd 2.0.x.
+  Check the database creation SQL files and update your database.
+  1) New table roster_version to support roster versioning.
+  2) Six new tables for optional pubsub ODBC storage.
+  3) Some tables in the MySQL database have a new created_at column.
+
+- As usual, it is recommended to backup the Mnesia spool directory and
   your SQL database (if used) before upgrading ejabberd.
+
+- The plugin of mod_pubsub "default" is renamed to "flat". You need
+  to edit the ejabberd configuration file and replace those names.
 
 - The listener options 'ip' and inet6' are not documented anymore
   but they are supported and you can continue using them.
   There is a new syntax to define IP address and IP version.
   As usual, check the ejabberd Guide for more information.
 
+- The log file sasl.log is now called erlang.log
+
 - ejabberdctl commands now have _ characters instead of -.
   For backwards compatibility, it is still supported -.
 
 - mod_offline has a new option: access_max_user_messages.
   The old option user_max_messages is no longer supported.
+
+- If you upgrade from ejabberd trunk SVN, you must execute this:
+  $ ejabberdctl rename_default_nodeplugin
 
 - Default installation directories changed a bit:
   * The Mnesia spool files that were previously stored in
@@ -250,5 +274,3 @@
 
   You can officially report bugs on ProcessOne support site:
   http://support.process-one.net/
-
-END

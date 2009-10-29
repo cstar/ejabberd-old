@@ -84,15 +84,12 @@
 %% Module start with or without supervisor:
 -ifdef(NO_TRANSIENT_SUPERVISORS).
 -define(SUPERVISOR_START, p1_fsm:start(ejabberd_s2s_out, [From, Host, Type],
-				       ?FSMLIMITS ++ ?FSMOPTS)).
+				       fsm_limit_opts() ++ ?FSMOPTS)).
 -else.
 -define(SUPERVISOR_START, supervisor:start_child(ejabberd_s2s_out_sup,
 						 [From, Host, Type])).
 -endif.
 
-%% Only change this value if you now what your are doing:
--define(FSMLIMITS,[]).
-%% -define(FSMLIMITS, [{max_queue, 2000}]).
 -define(FSMTIMEOUT, 30000).
 
 %% We do not block on send anymore.
@@ -132,7 +129,7 @@ start(From, Host, Type) ->
 
 start_link(From, Host, Type) ->
     p1_fsm:start_link(ejabberd_s2s_out, [From, Host, Type],
-		      ?FSMLIMITS ++ ?FSMOPTS).
+		      fsm_limit_opts() ++ ?FSMOPTS).
 
 start_connection(Pid) ->
     p1_fsm:send_event(Pid, init).
@@ -268,10 +265,14 @@ open_socket1(Host, Port) ->
 open_socket2(Type, Addr, Port) ->
     ?DEBUG("s2s_out: connecting to ~p:~p~n", [Addr, Port]),
     Timeout = outgoing_s2s_timeout(),
+    SockOpts = case erlang:system_info(otp_release) >= "R13B" of
+	true -> [{send_timeout_close, true}];
+	false -> []
+    end,
     case (catch ejabberd_socket:connect(Addr, Port,
 					[binary, {packet, 0},
 					 {send_timeout, ?TCP_SEND_TIMEOUT},
-					 {active, false}, Type],
+					 {active, false}, Type | SockOpts],
 					Timeout)) of
 	{ok, _Socket} = R -> R;
 	{error, Reason} = R ->
@@ -296,10 +297,11 @@ wait_for_stream({xmlstreamstart, _Name, Attrs}, StateData) ->
 	    {next_state, wait_for_features, StateData, ?FSMTIMEOUT};
 	{"jabber:server", "", true} when StateData#state.use_v10 ->
 	    {next_state, wait_for_features, StateData#state{db_enabled = false}, ?FSMTIMEOUT};
-	_ ->
+	{NSProvided, _, _} ->
 	    send_text(StateData, ?INVALID_NAMESPACE_ERR),
-	    ?INFO_MSG("Closing s2s connection: ~s -> ~s (invalid namespace)",
-		      [StateData#state.myname, StateData#state.server]),
+	    ?INFO_MSG("Closing s2s connection: ~s -> ~s (invalid namespace).~n"
+		      "Namespace provided: ~p~nNamespace expected: \"jabber:server\"",
+		      [StateData#state.myname, StateData#state.server, NSProvided]),
 	    {stop, normal, StateData}
     end;
 
@@ -1052,8 +1054,10 @@ srv_lookup(Server, Timeout, Retries) ->
         {error, _Reason} ->
             case inet_res:getbyname("_jabber._tcp." ++ Server, srv, Timeout) of
                 {error, timeout} ->
-                    ?ERROR_MSG("Couldn't resolve SRV records for ~p via nameservers ~p.",
-                               [Server, inet_db:res_option(nameserver)]),
+                    ?ERROR_MSG("The DNS servers~n  ~p~ntimed out on request"
+			       " for ~p IN SRV."
+			       " You should check your DNS configuration.",
+                               [inet_db:res_option(nameserver), Server]),
                     srv_lookup(Server, Timeout, Retries - 1);
                 R -> R
             end;
@@ -1192,3 +1196,11 @@ terminate_if_waiting_delay(From, To) ->
 	      Pid ! terminate_if_waiting_before_retry
       end,
       Pids).
+
+fsm_limit_opts() ->
+    case ejabberd_config:get_local_option(max_fsm_queue) of
+	N when is_integer(N) ->
+	    [{max_queue, N}];
+	_ ->
+	    []
+    end.
