@@ -38,12 +38,12 @@
 %%% useable and useful as is. Please, send us comments, feedback and
 %%% improvements.</p>
 
--module(node_hometree).
+-module(node_hometree_sdb).
 -author('christophe.romain@process-one.net').
 
 -include("pubsub.hrl").
 -include("jlib.hrl").
-
+-include("ejabberd.hrl").
 -behaviour(gen_pubsub_node).
 
 %% API definition
@@ -79,6 +79,8 @@
 	 node_to_path/1,
 	 path_to_node/1
 	]).
+-define(DOMAIN, "pubsub").
+-define(PREFIX, "item:").
 
 %% ================
 %% API definition
@@ -93,19 +95,26 @@
 %% <p>This function is mainly used to trigger the setup task necessary for the
 %% plugin. It can be used for example by the developer to create the specific
 %% module database schema if it does not exists yet.</p>
-init(_Host, _ServerHost, _Opts) ->
+init(Host, ServerHost, Opts) ->
     pubsub_subscription:init(),
-    mnesia:create_table(pubsub_state,
-			[{disc_copies, [node()]},
-			 {attributes, record_info(fields, pubsub_state)}]),
-    mnesia:create_table(pubsub_item,
-			[{disc_only_copies, [node()]},
-			 {attributes, record_info(fields, pubsub_item)}]),
-    ItemsFields = record_info(fields, pubsub_item),
-    case mnesia:table_info(pubsub_item, attributes) of
-	ItemsFields -> ok;
-	_ ->
-	    mnesia:transform_table(pubsub_item, ignore, ItemsFields)
+    erlsdb:start(),
+    Bucket = gen_mod:get_opt(s3_tree_bucket, Opts, ServerHost),
+    s3:start(),
+    {ok, Buckets} = s3:list_buckets(),
+    case lists:member(Bucket, Buckets) of 
+        false ->
+            s3:create_bucket(Bucket),
+            ?INFO_MSG("S3 bucket ~s created", [Bucket]);
+        true -> ok
+    end,
+    ets:insert(gen_mod:get_module_proc(Host, config), {s3_bucket, Bucket}),
+    ets:insert(gen_mod:get_module_proc(ServerHost, config), {s3_bucket, Bucket}),
+    {ok, Domains, _Token}  = erlsdb:list_domains(),
+    case lists:member(?DOMAIN, Domains) of 
+        false ->
+            erlsdb:create_domain(?DOMAIN),
+            ?INFO_MSG("SimpleDB domain ~s created", [?DOMAIN]);
+        true -> ok
     end,
     ok.
 
@@ -222,6 +231,7 @@ create_node_permission(Host, ServerHost, Node, _ParentNode, Owner, Access) ->
 %% @doc <p></p>
 create_node(NodeId, Owner) ->
     OwnerKey = jlib:jid_tolower(jlib:jid_remove_resource(Owner)),
+    ?DEBUG("create node : ~p",[#pubsub_state{stateid = {OwnerKey, NodeId}, affiliation = owner}]),
     set_state(#pubsub_state{stateid = {OwnerKey, NodeId}, affiliation = owner}),
     {result, {default, broadcast}}.
 
@@ -622,18 +632,23 @@ purge_node(NodeId, Owner) ->
 get_entity_affiliations(Host, Owner) ->
     SubKey = jlib:jid_tolower(Owner),
     GenKey = jlib:jid_remove_resource(SubKey),
-    States = mnesia:match_object(#pubsub_state{stateid = {GenKey, '_'}, _ = '_'}),
-    NodeTree = case catch ets:lookup(gen_mod:get_module_proc(Host, config), nodetree) of
-	    [{nodetree, N}] -> N;
+    SGenKey = jlib:jid_to_string(GenKey),
+    SHost = host_to_string(Host),
+    ?DEBUG("select * from pubsub where  host='"++SHost ++"' and jid='" ++ SGenKey ++ "'", []),
+    {ok, Items}=erlsdb:s_all("select * from pubsub where  host='"++SHost ++"' and jid='" ++ SGenKey ++ "%'"),
+    NodeTree = case ets:lookup(gen_mod:get_module_proc(Host, config), nodetree) of
+	    [{nodetree, NT}] -> NT;
 	    _ -> nodetree_tree
 	end,
-    Reply = lists:foldl(fun(#pubsub_state{stateid = {_, N}, affiliation = A}, Acc) ->
-	case NodeTree:get_node(N) of
-	    #pubsub_node{nodeid = {Host, _}} = Node -> [{Node, A}|Acc];
-	    _ -> Acc
-	end
-    end, [], States),
-    {result, Reply}.
+    Affs = lists:foldl(fun(S,Acc)->
+        #pubsub_state{stateid = {_, {_, N}}, affiliation = A} = sdb_to_record(S),
+        #pubsub_node{nodeid = {H, _}} = Node = NodeTree:get_node(Host, N), %%ECE Can't do any better. Need to change mod_pubsub otherwise.
+        case H of
+		    Host -> [{Node, A}|Acc];
+		    _ -> Acc
+		end
+    end, [],  Items),
+    {result, Affs}.
 
 get_node_affiliations(NodeId) ->
     {result, States} = get_states(NodeId),
@@ -670,21 +685,16 @@ set_affiliation(NodeId, Owner, Affiliation) ->
 %% that will be added to the affiliation stored in the main
 %% <tt>pubsub_state</tt> table.</p>
 get_entity_subscriptions(Host, Owner) ->
-    {U, D, _} = SubKey = jlib:jid_tolower(Owner),
-    GenKey = jlib:jid_remove_resource(SubKey),
-    States = case SubKey of
-	GenKey -> mnesia:match_object(
-	       #pubsub_state{stateid = {{U, D, '_'}, '_'}, _ = '_'});
-	_ -> mnesia:match_object(
-	       #pubsub_state{stateid = {GenKey, '_'}, _ = '_'})
-	    ++ mnesia:match_object(
-	       #pubsub_state{stateid = {SubKey, '_'}, _ = '_'})
-    end,
-    NodeTree = case catch ets:lookup(gen_mod:get_module_proc(Host, config), nodetree) of
-	    [{nodetree, N}] -> N;
+    SubKey = jlib:jid_tolower(Owner),
+    GenKey = jlib:jid_to_string(jlib:jid_remove_resource(SubKey)),
+    SHost = host_to_string(Host),
+    {ok, States}=erlsdb:s_all("select * from pubsub where host='"++ SHost ++"' and jid like '"++ GenKey ++"%'"),
+	NodeTree = case ets:lookup(gen_mod:get_module_proc(Host, config), nodetree) of
+	    [{nodetree, NT}] -> NT;
 	    _ -> nodetree_tree
 	end,
-    Reply = lists:foldl(fun(#pubsub_state{stateid = {J, N}, subscriptions = Ss}, Acc) ->
+	Reply = lists:foldl(fun(Record, Acc) ->
+	#pubsub_state{stateid = {J, N}, subscriptions = Ss} = sdb_to_record(Record),
 	case NodeTree:get_node(N) of
 	    #pubsub_node{nodeid = {Host, _}} = Node ->
 			lists:foldl(fun({Sub, SubId}, Acc2) ->
@@ -726,10 +736,7 @@ set_subscriptions(NodeId, Owner, Subscription, SubId) ->
     SubState = get_state(NodeId, SubKey),
     case {SubId, SubState#pubsub_state.subscriptions} of
 	{_, []} ->
-	    case Subscription of
-		none -> {error, ?ERR_EXTENDED(?ERR_BAD_REQUEST, "not-subscribed")};
-		_ -> new_subscription(NodeId, Owner, Subscription, SubState)
-	    end;
+	    {error, ?ERR_ITEM_NOT_FOUND};
 	{"", [{_, SID}]} ->
 	    case Subscription of
 		none -> unsub_with_subid(NodeId, SID, SubState);
@@ -753,12 +760,6 @@ replace_subscription(_, [], Acc) ->
     Acc;
 replace_subscription({Sub, SubId}, [{_, SubID} | T], Acc) ->
     replace_subscription({Sub, SubId}, T, [{Sub, SubID} | Acc]).
-
-new_subscription(NodeId, Owner, Subscription, SubState) ->
-    SubId = pubsub_subscription:add_subscription(Owner, NodeId, []),
-    Subscriptions = SubState#pubsub_state.subscriptions,
-    set_state(SubState#pubsub_state{subscriptions = [{Subscription, SubId} | Subscriptions]}),
-    {Subscription, SubId}.
 
 unsub_with_subid(NodeId, SubId, SubState) ->
     pubsub_subscription:delete_subscription(SubState#pubsub_state.stateid,
@@ -784,7 +785,7 @@ get_pending_nodes(Host, Owner) ->
 					       affiliation = owner,
 					       _           = '_'}),
     NodeIDs = [ID || #pubsub_state{stateid = {_, ID}} <- States],
-    NodeTree = case catch ets:lookup(gen_mod:get_module_proc(Host, config), nodetree) of
+    NodeTree = case ets:lookup(gen_mod:get_module_proc(Host, config), nodetree) of
 		    [{nodetree, N}] -> N;
 		    _               -> nodetree_tree
 	       end,
@@ -819,6 +820,28 @@ get_nodes_helper(NodeTree,
 	    false
     end.
 
+sdb_to_record({_Key, Attrs})->
+    str(Attrs, #pubsub_state{stateid={nil, {nil, nil}}});
+sdb_to_record(Item)->
+    str(Item, #pubsub_state{stateid={nil, {nil,nil}}}).
+    
+str([],#pubsub_state{}=State) -> 
+    State;
+str([{"host", V}|Rest], #pubsub_state{stateid={Jid, {_, Node}}}=N)->
+    Host = string_to_host(V),
+    str(Rest, N#pubsub_state{stateid={Jid, {Host, Node}}});
+str([{"node", V}|Rest], #pubsub_state{stateid={Jid, {Host, _}}}=N)->
+    Node = mod_pubsub:string_to_node(V),
+    str(Rest, N#pubsub_state{stateid={Jid, {Host, Node}}});
+str([{"jid", V}|Rest], #pubsub_state{stateid={_, {Host, Node}}}=N)->
+    Jid = jlib:jid_tolower(jlib:string_to_jid(V)),
+    str(Rest, N#pubsub_state{stateid={Jid, {Host, Node}}});    
+str([{"affiliation", V}|Rest], N)->
+    str(Rest, N#pubsub_state{affiliation=l2a(V)});
+str([{"subscription", V}|Rest], N)->
+    str(Rest, N#pubsub_state{subscriptions=[l2a(V)|N#pubsub_state.subscriptions]});
+str([{_, _ }|Rest], S)->str(Rest, S).
+
 %% @spec (NodeId) -> [States] | []
 %%	 NodeId = mod_pubsub:pubsubNodeId()
 %% @doc Returns the list of stored states for a given node.
@@ -844,18 +867,39 @@ get_states(NodeId) ->
 %%	 JID = mod_pubsub:jid()
 %%	 State = mod_pubsub:pubsubItems()
 %% @doc <p>Returns a state (one state list), given its reference.</p>
-get_state(NodeId, JID) ->
-    StateId = {JID, NodeId},
-    case catch mnesia:read({pubsub_state, StateId}) of
-	[State] when is_record(State, pubsub_state) -> State;
-	_ -> #pubsub_state{stateid=StateId}
-    end.
+get_state({Host, Node}, JID) ->
+    {_SJID, _SHost, _SNode, Key} = make_key({JID, {Host, Node}}),
+    {ok, Attrs} = erlsdb:get_attributes(?DOMAIN, Key), 
+    S = sdb_to_record(Attrs),
+    State = S#pubsub_state{stateid = {JID, {Host, Node}}},
+    %?DEBUG("state fetched from SDB for JID : ~s / Host: ~s / Node : ~s :~n~p", [SJID, SHost, SNode, State]),
+    State.
+
+make_key({JID, {Host, Node}})->
+    SNode = mod_pubsub:node_to_string(Node),
+    SHost = host_to_string(Host),
+    SJID = jlib:jid_to_string(JID),
+    {SJID, SHost, SNode, SHost ++ ":" ++ SNode ++ ":" ++ SJID}.
+
 
 %% @spec (State) -> ok | {error, Reason::stanzaError()}
 %%	 State = mod_pubsub:pubsubStates()
 %% @doc <p>Write a state into database.</p>
-set_state(State) when is_record(State, pubsub_state) ->
-    mnesia:write(State);
+set_state(#pubsub_state{stateid = StateId,
+                      affiliation = Aff,
+                      subscriptions = Subs})->
+    {SJID, SHost, SNode, Key} = make_key(StateId),
+    SdbSubs = lists:map(fun(S)->
+        {"subscription", a2l(S)}
+    end, Subs),
+
+    erlsdb:replace_attributes(?DOMAIN, Key, [{"host", SHost}, 
+                                         {"node", SNode},
+                                         {"jid", SJID},
+                                         {"affiliation", a2l(Aff)}
+                                         | SdbSubs ]),
+
+    ok;
 set_state(_) ->
     {error, ?ERR_INTERNAL_SERVER_ERROR}.
 
@@ -864,7 +908,9 @@ set_state(_) ->
 %%	 JID = mod_pubsub:jid()
 %% @doc <p>Delete a state from database.</p>
 del_state(NodeId, JID) ->
-    mnesia:delete({pubsub_state, {JID, NodeId}}).
+    {_SJID, _SHost, _SNode, Key} = make_key({JID, NodeId}),
+    erlsdb:delete_item(?DOMAIN,Key),
+    ok.
 
 %% @spec (NodeId, From) -> [Items] | []
 %%	 NodeId = mod_pubsub:pubsubNodeId()
@@ -879,9 +925,13 @@ del_state(NodeId, JID) ->
 %% they can implement this function like this:
 %% ```get_items(NodeId, From) ->
 %%	   node_default:get_items(NodeId, From).'''</p>
-get_items(NodeId, _From) ->
-    Items = mnesia:match_object(#pubsub_item{itemid = {'_', NodeId}, _ = '_'}),
-    {result, lists:reverse(lists:keysort(#pubsub_item.modification, Items))}.
+get_items({Host, Node}, _From) ->
+    Items = s3:get_objects(get_bucket(Host), [{prefix,build_key(Host, Node,"")}] ),
+    Items2 = lists:map(fun({_K, Conf, _H})->
+        binary_to_term(list_to_binary(Conf))
+    end, Items),
+    {result, lists:reverse(lists:keysort(#pubsub_item.modification, Items2))}.
+
 get_items(NodeId, JID, AccessModel, PresenceSubscription, RosterGroup, _SubId) ->
     SubKey = jlib:jid_tolower(JID),
     GenKey = jlib:jid_remove_resource(SubKey),
@@ -919,17 +969,25 @@ get_items(NodeId, JID, AccessModel, PresenceSubscription, RosterGroup, _SubId) -
 	    get_items(NodeId, JID)
     end.
 
+build_key(Host, Node,ItemId)->
+    SHost = host_to_string(Host),
+    SNode = mod_pubsub:node_to_string(Node),
+    ?PREFIX++":"++SHost++":"++SNode++":"++ItemId.
+build_key(#pubsub_item{itemid={ItemId, {Host, Node}}})->
+    build_key(Host, Node,ItemId).
+
+
 %% @spec (NodeId, ItemId) -> [Item] | []
 %%	 NodeId = mod_pubsub:pubsubNodeId()
 %%	 ItemId = string()
 %%	 Item = mod_pubsub:pubsubItems()
 %% @doc <p>Returns an item (one item list), given its reference.</p>
-get_item(NodeId, ItemId) ->
-    case mnesia:read({pubsub_item, {ItemId, NodeId}}) of
-	[Item] when is_record(Item, pubsub_item) ->
-	    {result, Item};
-	_ ->
-	    {error, ?ERR_ITEM_NOT_FOUND}
+get_item({Host, Node}, ItemId) ->
+    case s3:read_object(get_bucket(Host), build_key(Host, Node,ItemId)) of
+        {ok, {Conf, _H}}->
+            {result, binary_to_term(list_to_binary(Conf))};
+        _ -> 
+            {error, ?ERR_ITEM_NOT_FOUND}
     end.
 get_item(NodeId, ItemId, JID, AccessModel, PresenceSubscription, RosterGroup, _SubId) ->
     SubKey = jlib:jid_tolower(JID),
@@ -970,8 +1028,11 @@ get_item(NodeId, ItemId, JID, AccessModel, PresenceSubscription, RosterGroup, _S
 %% @spec (Item) -> ok | {error, Reason::stanzaError()}
 %%	 Item = mod_pubsub:pubsubItems()
 %% @doc <p>Write an item into database.</p>
-set_item(Item) when is_record(Item, pubsub_item) ->
-    mnesia:write(Item);
+set_item(#pubsub_item{itemid={_,NodeId}}=Item) when is_record(Item, pubsub_item) ->
+    spawn(fun()->
+        s3:write_object(get_bucket(NodeId), build_key(Item), term_to_binary(Item), "application/erlang")
+    end),
+    ok;
 set_item(_) ->
     {error, ?ERR_INTERNAL_SERVER_ERROR}.
 
@@ -979,8 +1040,11 @@ set_item(_) ->
 %%	 NodeId = mod_pubsub:pubsubNodeId()
 %%	 ItemId = string()
 %% @doc <p>Delete an item from database.</p>
-del_item(NodeId, ItemId) ->
-    mnesia:delete({pubsub_item, {ItemId, NodeId}}).
+del_item({Host, Node}=NodeId, ItemId) ->
+    spawn(fun()->
+        s3:delete_object(get_bucket(NodeId), build_key(Host, Node, ItemId))
+    end),
+    ok.
 del_items(NodeId, ItemIds) ->
     lists:foreach(fun(ItemId) ->
 	del_item(NodeId, ItemId)
@@ -1010,6 +1074,44 @@ can_fetch_item(publisher,    _)             -> true;
 can_fetch_item(outcast,      _)             -> false;
 can_fetch_item(none, Subscriptions) -> is_subscribed(Subscriptions);
 can_fetch_item(_Affiliation, _Subscription) -> false.
+
+%% @spec (NodeId) -> Node
+%% @doc retreive pubsubNode() representation giving a NodeId
+%get_nodename(NodeId) ->
+%    case mnesia:index_read(pubsub_node, NodeId, #pubsub_node.id) of
+%	[#pubsub_node{nodeid = {_, Node}}] -> Node;
+%	_ -> []
+%    end.
+
+a2l([])->[];    
+a2l(Atom) when is_atom(Atom)->atom_to_list(Atom).
+l2a("member")->member;
+l2a("owner")->owner;
+l2a("publisher")->publisher;
+l2a("outcast")->outcast;
+l2a("subscribed")->subscribed;
+l2a("none")->none.
+
+host_to_string({_, _, _}=Host)->
+    jlib:jid_to_string(Host);
+host_to_string(Host) when is_list(Host)-> Host.
+string_to_host(Host) when is_list(Host)->
+   case jlib:jid_tolower(jlib:string_to_jid(Host)) of
+        {[], PubSub, []} -> PubSub;
+        JID -> JID
+    end.
+    
+get_bucket({_U, S, _R})->
+    get_bucket(S);
+get_bucket({{_U, S, _R}, _Node})->
+    get_bucket(S);
+get_bucket({Host, _Node})->
+    get_bucket(Host);
+get_bucket(Host) when is_list(Host)->
+    [{s3_bucket, Bucket}] =  ets:lookup(gen_mod:get_module_proc(Host, config), s3_bucket),
+    Bucket;
+get_bucket(Host)->
+    ?ERROR_MSG("Unsupported host format : ~p", [Host]).
 
 is_subscribed(Subscriptions) ->
     lists:any(fun ({subscribed, _SubId}) -> true;

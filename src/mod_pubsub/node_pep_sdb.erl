@@ -70,12 +70,12 @@
 	]).
 
 init(Host, ServerHost, Opts) ->
-    node_hometree:init(Host, ServerHost, Opts),
+    node_hometree_sdb:init(Host, ServerHost, Opts),
     complain_if_modcaps_disabled(ServerHost),
     ok.
 
 terminate(Host, ServerHost) ->
-    node_hometree:terminate(Host, ServerHost),
+    node_hometree_sdb:terminate(Host, ServerHost),
     ok.
 
 options() ->
@@ -135,40 +135,40 @@ create_node_permission(Host, ServerHost, _Node, _ParentNode, Owner, Access) ->
     {result, Allowed}.
 
 create_node(NodeId, Owner) ->
-    case node_hometree:create_node(NodeId, Owner) of
+    case node_hometree_sdb:create_node(NodeId, Owner) of
 	{result, _} -> {result, []};
 	Error -> Error
     end.
 
 delete_node(Removed) ->
-    case node_hometree:delete_node(Removed) of
+    case node_hometree_sdb:delete_node(Removed) of
 	{result, {_, _, Removed}} -> {result, {[], Removed}};
 	Error -> Error
     end.
 
 subscribe_node(NodeId, Sender, Subscriber, AccessModel,
 	       SendLast, PresenceSubscription, RosterGroup, Options) ->
-    node_hometree:subscribe_node(
+    node_hometree_sdb:subscribe_node(
       NodeId, Sender, Subscriber, AccessModel, SendLast,
       PresenceSubscription, RosterGroup, Options).
 
 unsubscribe_node(NodeId, Sender, Subscriber, SubID) ->
-    case node_hometree:unsubscribe_node(NodeId, Sender, Subscriber, SubID) of
+    case node_hometree_sdb:unsubscribe_node(NodeId, Sender, Subscriber, SubID) of
 	{error, Error} -> {error, Error};
 	{result, _} -> {result, []}
     end.
 
 publish_item(NodeId, Publisher, Model, MaxItems, ItemId, Payload) ->
-    node_hometree:publish_item(NodeId, Publisher, Model, MaxItems, ItemId, Payload).
+    node_hometree_sdb:publish_item(NodeId, Publisher, Model, MaxItems, ItemId, Payload).
 
 remove_extra_items(NodeId, MaxItems, ItemIds) ->
-    node_hometree:remove_extra_items(NodeId, MaxItems, ItemIds).
+    node_hometree_sdb:remove_extra_items(NodeId, MaxItems, ItemIds).
 
 delete_item(NodeId, Publisher, PublishModel, ItemId) ->
-    node_hometree:delete_item(NodeId, Publisher, PublishModel, ItemId).
+    node_hometree_sdb:delete_item(NodeId, Publisher, PublishModel, ItemId).
 
 purge_node(NodeId, Owner) ->
-    node_hometree:purge_node(NodeId, Owner).
+    node_hometree_sdb:purge_node(NodeId, Owner).
 
 get_entity_affiliations(_Host, Owner) ->
     {_, D, _} = SubKey = jlib:jid_tolower(Owner),
@@ -188,43 +188,43 @@ get_entity_affiliations(_Host, Owner) ->
     {result, Reply}.
 
 get_node_affiliations(NodeId) ->
-    node_hometree:get_node_affiliations(NodeId).
+    node_hometree_sdb:get_node_affiliations(NodeId).
 
 get_affiliation(NodeId, Owner) ->
-    node_hometree:get_affiliation(NodeId, Owner).
+    node_hometree_sdb:get_affiliation(NodeId, Owner).
 
 set_affiliation(NodeId, Owner, Affiliation) ->
-    node_hometree:set_affiliation(NodeId, Owner, Affiliation).
-
-get_entity_subscriptions(_Host, Owner) ->
-    {U, D, _} = SubKey = jlib:jid_tolower(Owner),
-    GenKey = jlib:jid_remove_resource(SubKey),
-    States = case SubKey of
-	GenKey -> mnesia:match_object(
-	       #pubsub_state{stateid = {{U, D, '_'}, '_'}, _ = '_'});
-	_ -> mnesia:match_object(
-	       #pubsub_state{stateid = {GenKey, '_'}, _ = '_'})
-	    ++ mnesia:match_object(
-	       #pubsub_state{stateid = {SubKey, '_'}, _ = '_'})
-    end,
-    NodeTree = case catch ets:lookup(gen_mod:get_module_proc(D, config), nodetree) of
-	    [{nodetree, N}] -> N;
-	    _ -> nodetree_tree
-	end,
-    Reply = lists:foldl(fun(#pubsub_state{stateid = {J, N}, subscriptions = Ss}, Acc) ->
-	case NodeTree:get_node(N) of
-	    #pubsub_node{nodeid = {{_, D, _}, _}} = Node ->
-			lists:foldl(fun({subscribed, SubID}, Acc2) ->
-					   [{Node, subscribed, SubID, J} | Acc2];
-					({pending, _SubID}, Acc2) ->
-					    [{Node, pending, J} | Acc2];
-					(S, Acc2) ->
-					    [{Node, S, J} | Acc2]
-				    end, Acc, Ss);
-	    _ -> Acc
-	end
-    end, [], States),
-    {result, Reply}.
+    node_hometree_sdb:set_affiliation(NodeId, Owner, Affiliation).
+get_entity_subscriptions(Host, Owner) ->
+    node_default:get_entity_subscriptions(Host, Owner).
+    %{U, D, _} = SubKey = jlib:jid_tolower(Owner),
+    %GenKey = jlib:jid_remove_resource(SubKey),
+    %States = case SubKey of
+	%GenKey -> mnesia:match_object(
+	%       #pubsub_state{stateid = {{U, D, '_'}, '_'}, _ = '_'});
+	%_ -> mnesia:match_object(
+	%       #pubsub_state{stateid = {GenKey, '_'}, _ = '_'})
+	%    ++ mnesia:match_object(
+	%       #pubsub_state{stateid = {SubKey, '_'}, _ = '_'})
+    %end,
+    %NodeTree = case ets:lookup(gen_mod:get_module_proc(D, config), nodetree) of
+	%    [{nodetree, N}] -> N;
+	%    _ -> nodetree_tree
+	%end,
+    %Reply = lists:foldl(fun(#pubsub_state{stateid = {J, N}, subscriptions = Ss}, Acc) ->
+	%case NodeTree:get_node(N) of
+	%    #pubsub_node{nodeid = {{_, D, _}, _}} = Node ->
+	%		lists:foldl(fun({subscribed, SubID}, Acc2) ->
+	%				   [{Node, subscribed, SubID, J} | Acc2];
+	%				({pending, _SubID}, Acc2) ->
+	%				    [{Node, pending, J} | Acc2];
+	%				(S, Acc2) ->
+	%				    [{Node, S, J} | Acc2]
+	%			    end, Acc, Ss);
+	%    _ -> Acc
+	%end
+    %end, [], States),
+    %{result, Reply}.
 
 get_node_subscriptions(NodeId) ->
     %% note: get_node_subscriptions is used for broadcasting
@@ -232,49 +232,49 @@ get_node_subscriptions(NodeId) ->
     %% but that call returns also all subscription to none
     %% and this is required for broadcast to occurs
     %% DO NOT REMOVE
-    node_hometree:get_node_subscriptions(NodeId).
+    node_hometree_sdb:get_node_subscriptions(NodeId).
 
 get_subscriptions(NodeId, Owner) ->
-    node_hometree:get_subscriptions(NodeId, Owner).
+    node_hometree_sdb:get_subscriptions(NodeId, Owner).
 
 set_subscriptions(NodeId, Owner, Subscription, SubId) ->
-    node_hometree:set_subscriptions(NodeId, Owner, Subscription, SubId).
+    node_hometree_sdb:set_subscriptions(NodeId, Owner, Subscription, SubId).
 
 get_pending_nodes(Host, Owner) ->
-    node_hometree:get_pending_nodes(Host, Owner).
+    node_hometree_sdb:get_pending_nodes(Host, Owner).
 
 get_states(NodeId) ->
-    node_hometree:get_states(NodeId).
+    node_hometree_sdb:get_states(NodeId).
 
 get_state(NodeId, JID) ->
-    node_hometree:get_state(NodeId, JID).
+    node_hometree_sdb:get_state(NodeId, JID).
 
 set_state(State) ->
-    node_hometree:set_state(State).
+    node_hometree_sdb:set_state(State).
 
 get_items(NodeId, From) ->
-    node_hometree:get_items(NodeId, From).
+    node_hometree_sdb:get_items(NodeId, From).
 
 get_items(NodeId, JID, AccessModel, PresenceSubscription, RosterGroup, SubId) ->
-    node_hometree:get_items(NodeId, JID, AccessModel, PresenceSubscription, RosterGroup, SubId).
+    node_hometree_sdb:get_items(NodeId, JID, AccessModel, PresenceSubscription, RosterGroup, SubId).
 
 get_item(NodeId, ItemId) ->
-    node_hometree:get_item(NodeId, ItemId).
+    node_hometree_sdb:get_item(NodeId, ItemId).
 
 get_item(NodeId, ItemId, JID, AccessModel, PresenceSubscription, RosterGroup, SubId) ->
-    node_hometree:get_item(NodeId, ItemId, JID, AccessModel, PresenceSubscription, RosterGroup, SubId).
+    node_hometree_sdb:get_item(NodeId, ItemId, JID, AccessModel, PresenceSubscription, RosterGroup, SubId).
 
 set_item(Item) ->
-    node_hometree:set_item(Item).
+    node_hometree_sdb:set_item(Item).
 
 get_item_name(Host, Node, Id) ->
-    node_hometree:get_item_name(Host, Node, Id).
+    node_hometree_sdb:get_item_name(Host, Node, Id).
 
 node_to_path(Node) ->
-    node_flat:node_to_path(Node).
+    node_flat_sdb:node_to_path(Node).
 
 path_to_node(Path) ->
-    node_flat:path_to_node(Path).
+    node_flat_sdb:path_to_node(Path).
 
 
 %%%

@@ -2813,7 +2813,7 @@ subscription_to_string(_) -> "none".
 %%	 Node = pubsubNode()
 %%	 NodeStr = string()
 %% @doc <p>Convert a node type from pubsubNode to string.</p>
-node_to_string(Node) -> binary_to_list(Node).
+node_to_string(Node)  -> binary_to_list(Node).
 string_to_node(SNode) -> list_to_binary(SNode).
 
 %% @spec (Host) -> jid()
