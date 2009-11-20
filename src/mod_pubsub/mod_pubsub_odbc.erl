@@ -191,8 +191,8 @@ init([ServerHost, Opts]) ->
     ets:insert(gen_mod:get_module_proc(Host, config), {max_items_node, MaxItemsNode}),
     ets:insert(gen_mod:get_module_proc(ServerHost, config), {nodetree, NodeTree}),
     ets:insert(gen_mod:get_module_proc(ServerHost, config), {plugins, Plugins}),
-    ets:insert(gen_mod:get_module_proc(ServerHost, config), {last_item_cache, Plugins}),
-    ets:insert(gen_mod:get_module_proc(ServerHost, config), {max_items_node, LastItemCache}),
+    ets:insert(gen_mod:get_module_proc(ServerHost, config), {last_item_cache, LastItemCache}),
+    ets:insert(gen_mod:get_module_proc(ServerHost, config), {max_items_node, MaxItemsNode}),
     ets:insert(gen_mod:get_module_proc(ServerHost, config), {pep_mapping, PepMapping}),
     ejabberd_hooks:add(disco_sm_identity, ServerHost, ?MODULE, disco_sm_identity, 75),
     ejabberd_hooks:add(disco_sm_features, ServerHost, ?MODULE, disco_sm_features, 75),
@@ -834,6 +834,18 @@ do_route(ServerHost, Access, Plugins, Host, From, To, Packet) ->
 	    end
     end.
 
+command_disco_info(_Host, <<?NS_COMMANDS>>, _From) ->
+    IdentityEl = {xmlelement, "identity", [{"category", "automation"},
+                                        {"type", "command-list"}],
+                  []},
+    {result, [IdentityEl]};
+command_disco_info(_Host, <<?NS_PUBSUB_GET_PENDING>>, _From) ->
+    IdentityEl = {xmlelement, "identity", [{"category", "automation"},
+                                        {"type", "command-node"}],
+                  []},
+    FeaturesEl = {xmlelement, "feature", [{"var", ?NS_COMMANDS}], []},
+    {result, [IdentityEl, FeaturesEl]}.
+
 node_disco_info(Host, Node, From) ->
     node_disco_info(Host, Node, From, true, true).
 node_disco_identity(Host, Node, From) ->
@@ -897,11 +909,16 @@ iq_disco_info(Host, SNode, From, Lang) ->
 		{xmlelement, "feature", [{"var", ?NS_DISCO_INFO}], []},
 		{xmlelement, "feature", [{"var", ?NS_DISCO_ITEMS}], []},
 		{xmlelement, "feature", [{"var", ?NS_PUBSUB}], []},
+		{xmlelement, "feature", [{"var", ?NS_COMMANDS}], []},
 		{xmlelement, "feature", [{"var", ?NS_VCARD}], []}] ++
 	     lists:map(fun
 			("rsm")-> {xmlelement, "feature", [{"var", ?NS_RSM}], []};
 			(T) -> {xmlelement, "feature", [{"var", ?NS_PUBSUB++"#"++T}], []}
 	     end, features(Host, Node))};
+        <<?NS_COMMANDS>> ->
+            command_disco_info(Host, Node, From);
+        <<?NS_PUBSUB_GET_PENDING>> ->
+            command_disco_info(Host, Node, From);
 	_ ->
 	    node_disco_info(Host, Node, From)
     end.
@@ -918,6 +935,13 @@ iq_disco_items(Host, [], From, _RSM) ->
         Other ->
             Other
     end;
+iq_disco_items(Host, ?NS_COMMANDS, _From, _RSM) ->
+    %% TODO: support localization of this string
+    CommandItems = [{xmlelement, "item", [{"jid", Host}, {"node", ?NS_PUBSUB_GET_PENDING}, {"name", "Get Pending"}], []}],
+    {result, CommandItems};
+iq_disco_items(_Host, ?NS_PUBSUB_GET_PENDING, _From, _RSM) ->
+    CommandItems = [],
+    {result, CommandItems};
 iq_disco_items(Host, Item, From, RSM) ->
     case string:tokens(Item, "!") of
 	[_SNode, _ItemID] ->
@@ -987,7 +1011,7 @@ iq_get_vcard(Lang) ->
       [{xmlcdata,
 	translate:translate(Lang,
 			    "ejabberd Publish-Subscribe module") ++
-			    "\nCopyright (c) 2004-2009 Process-One"}]}].
+			    "\nCopyright (c) 2004-2009 ProcessOne"}]}].
 
 iq_pubsub(Host, ServerHost, From, IQType, SubEl, Lang) ->
     iq_pubsub(Host, ServerHost, From, IQType, SubEl, Lang, all, plugins(ServerHost)).
@@ -1182,6 +1206,13 @@ adhoc_request(Host, _ServerHost, Owner,
 	Error ->
 	    Error
     end;
+adhoc_request(_Host, _ServerHost, _Owner, #adhoc_request{action = "cancel"},
+              _Access, _Plugins) ->
+    #adhoc_response{status = canceled};
+adhoc_request(Host, ServerHost, Owner, #adhoc_request{action = []} = R,
+              Access, Plugins) ->
+    adhoc_request(Host, ServerHost, Owner, R#adhoc_request{action = "execute"},
+                  Access, Plugins);
 adhoc_request(_Host, _ServerHost, _Owner, Other, _Access, _Plugins) ->
     ?DEBUG("Couldn't process ad hoc command:~n~p", [Other]),
     {error, ?ERR_ITEM_NOT_FOUND}.
@@ -1234,17 +1265,12 @@ send_pending_auth_events(Host, Node, Owner) ->
     ?DEBUG("Sending pending auth events for ~s on ~s:~s",
 	   [jlib:jid_to_string(Owner), Host, node_to_string(Node)]),
     Action =
-	fun (#pubsub_node{id = NodeID, type = Type} = N) ->
+	fun (#pubsub_node{id = NodeID, type = Type}) ->
 		case lists:member("get-pending", features(Type)) of
 		    true ->
 			case node_call(Type, get_affiliation, [NodeID, Owner]) of
 			    {result, owner} ->
-				{result, Subscriptions} = node_call(Type, get_node_subscriptions, [NodeID]),
-				lists:foreach(fun({J, pending, _SubID}) -> send_authorization_request(N, jlib:make_jid(J));
-						 ({J, pending}) -> send_authorization_request(N, jlib:make_jid(J));
-						 (_) -> ok
-					      end, Subscriptions),
-				{result, ok};
+                                node_call(Type, get_node_subscriptions, [NodeID]);
 			    _ ->
 				{error, ?ERR_FORBIDDEN}
 			end;
@@ -1253,7 +1279,11 @@ send_pending_auth_events(Host, Node, Owner) ->
 		end
 	end,
     case transaction(Host, Node, Action, sync_dirty) of
-	{result, _} ->
+	{result, {N, Subscriptions}} ->
+            lists:foreach(fun({J, pending, _SubID}) -> send_authorization_request(N, jlib:make_jid(J));
+                             ({J, pending}) -> send_authorization_request(N, jlib:make_jid(J));
+                             (_) -> ok
+                          end, Subscriptions),
 	    #adhoc_response{};
 	Err ->
 	    Err
@@ -1585,7 +1615,7 @@ create_node(Host, ServerHost, Node, Owner, GivenType, Access, Configuration) ->
 %%<li>The node is the root collection node, which cannot be deleted.</li>
 %%<li>The specified node does not exist.</li>
 %%</ul>
-delete_node(_Host, [], _Owner) ->
+delete_node(_Host, <<>>, _Owner) ->
     %% Node is the root
     {error, ?ERR_NOT_ALLOWED};
 delete_node(Host, Node, Owner) ->
@@ -3423,7 +3453,7 @@ features(Type) ->
 		      {'EXIT', {undef, _}} -> [];
 		      Result -> Result
 		  end.
-features(Host, []) ->
+features(Host, <<>>) ->
     lists:usort(lists:foldl(fun(Plugin, Acc) ->
 	Acc ++ features(Plugin)
     end, [], plugins(Host)));
