@@ -26,7 +26,7 @@
 %%% @doc The module <strong>{@module}</strong> is the pep PubSub plugin.
 %%% <p>PubSub plugin nodes are using the {@link gen_pubsub_node} behaviour.</p>
 
--module(node_pep).
+-module(node_pep_sdb).
 -author('christophe.romain@process-one.net').
 
 -include("ejabberd.hrl").
