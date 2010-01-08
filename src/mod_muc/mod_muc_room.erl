@@ -350,6 +350,7 @@ normal_state({route, From, "",
 	    ejabberd_router:route(StateData#state.jid,
 				  From,
 				  jlib:iq_to_xml(IQRes)),
+		%%TODO
 	    case NewStateData of
 		stop ->
 		    {stop, normal, StateData};
@@ -475,11 +476,11 @@ normal_state({route, From, ToNick,
 	      {xmlelement, "iq", Attrs, _Els} = Packet},
 	     StateData) ->
     Lang = xml:get_attr_s("xml:lang", Attrs),
-    StanzaId = xml:get_attr_s("id", Attrs),
-    case {(StateData#state.config)#config.allow_query_users,
-	  is_user_online_iq(StanzaId, From, StateData)} of
-	{true, {true, NewId, FromFull}} ->
-	    case find_jid_by_nick(ToNick, StateData) of
+    %TODO
+    NewState = case {handler_call(process_user_iq, [From, ToNick, Lang, Packet],StateData),
+	  is_user_online(From, StateData)} of
+	{{allow, P2, NSD}, true} ->
+	    case find_jid_by_nick(ToNick, NSD) of
 		false ->
 		    case jlib:iq_query_info(Packet) of
 			reply ->
@@ -496,15 +497,14 @@ normal_state({route, From, ToNick,
 		    end;
 		ToJID ->
 		    {ok, #user{nick = FromNick}} =
-			?DICT:find(jlib:jid_tolower(FromFull),
-				   StateData#state.users),
-		    {ToJID2, Packet2} = handle_iq_vcard(FromFull, ToJID,
-							StanzaId, NewId,Packet),
+			?DICT:find(jlib:jid_tolower(From),
+				   NSD#state.users),
 		    ejabberd_router:route(
-		      jlib:jid_replace_resource(StateData#state.jid, FromNick),
-		      ToJID2, Packet2)
+		      jlib:jid_replace_resource(NSD#state.jid, FromNick),
+		      ToJID, P2),
+		    NSD
 	    end;
-	{_, {false, _, _}} ->
+	{{_, _, NSD}, false} ->
 	    case jlib:iq_query_info(Packet) of
 		reply ->
 		    NSD;
@@ -789,6 +789,92 @@ process_groupchat_message(From, {xmlelement, "message", Attrs, _Els} = Packet,
 	    {next_state, normal_state, StateData}
     end.
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Admin stuff
+process_iq(UserInfo, Affiliation, ?NS_MUC_ADMIN, set, Lang, SubEl, State) ->
+    {xmlelement, _, _, Items} = SubEl,
+    process_admin_items_set(UserInfo,Affiliation, Items, Lang, State);
+
+
+process_iq(#user{role = FRole} = UserInfo,FAffiliation, ?NS_MUC_ADMIN, get, Lang, SubEl,State) ->
+    case xml:get_subtag(SubEl, "item") of
+	false ->
+	    {error, ?ERR_BAD_REQUEST};
+	Item ->
+	    case xml:get_tag_attr("role", Item) of
+		false ->
+		    case xml:get_tag_attr("affiliation", Item) of
+			false ->
+			    {error, ?ERR_BAD_REQUEST, State};
+			{value, StrAffiliation} ->
+			    case list_to_affiliation(StrAffiliation,State) of
+				error ->
+				    {error, ?ERR_BAD_REQUEST};
+				SAffiliation ->
+				    case handler_call(can_get_affiliations,[UserInfo, FAffiliation], State) of
+				    {_, true, _} ->
+					    Items = items_with_affiliation(
+						      SAffiliation, State),
+					    {result, Items, State};
+					_ ->
+					    ErrText = "Administrator privileges required : " ++ atom_to_list(FAffiliation),
+					    {error, ?ERRT_FORBIDDEN(Lang, ErrText)}
+				    end
+			    end
+		    end;
+		{value, StrRole} ->
+		    case list_to_role(StrRole, State) of
+			error ->
+			    {error, ?ERR_BAD_REQUEST};
+			SRole ->
+			    if
+				FRole == moderator ->
+				    Items = items_with_role(SRole, State),
+				    {result, Items, State};
+				true ->
+				    ErrText = "Moderator privileges required",
+				    {error, ?ERRT_FORBIDDEN(Lang, ErrText)}
+			    end
+		    end
+	    end
+    end;
+    
+process_iq(UserInfo,Aff, ?NS_MUC_OWNER , set, Lang, SubEl, State) ->
+	    {xmlelement, _Name, _Attrs, Els} = SubEl,
+	    case xml:remove_cdata(Els) of
+		[{xmlelement, "x", _Attrs1, _Els1} = XEl] ->
+		    case {xml:get_tag_attr_s("xmlns", XEl),
+			  xml:get_tag_attr_s("type", XEl)} of
+			{?NS_XDATA, "cancel"} ->
+			    {result, [], State};
+			{?NS_XDATA, "submit"} ->
+				 case handler_call(set_config, [UserInfo, Aff, XEl, Lang], State) of
+				      {result, _, NS} = R ->
+				         mod_muc_room:add_to_log(roomconfig_change, [], NS),
+				         R;
+				      E -> E
+				 end;
+			_ ->
+			    {error, ?ERR_BAD_REQUEST}
+		    end;
+		%%% TODO
+		[{xmlelement, "destroy", _Attrs1, _Els1} = SubEl1] ->
+		    ?INFO_MSG("Destroyed MUC room ~s by the owner ~s", 
+			      [jlib:jid_to_string(State#state.jid), jlib:jid_to_string(UserInfo#user.jid)]),
+		    mod_muc_room:destroy_room(SubEl1, State);
+        _ ->
+            {error, ?ERR_BAD_REQUEST}
+	    end;
+	
+process_iq(UserInfo,Affiliation, ?NS_MUC_OWNER, get, Lang, _SubEl,State) ->
+	handler_call(get_config,[UserInfo, Affiliation, Lang], State);
+	
+process_iq(UserInfo, Affiliation, ?NS_DISCO_INFO=XMLNS, get=Type, Lang, _SubEl, State) ->
+    handler_call(get_disco_info, [UserInfo, Lang, nil], State);
+    	
+process_iq(UserInfo, FAffiliation, XMLNS, Type, Lang, SubEl, State)->
+    handler_call(process_iq, [UserInfo, FAffiliation, XMLNS, Type, Lang, SubEl], State).
+
 %% @doc Check if this non participant can send message to room.
 %%
 %% XEP-0045 v1.23:
@@ -938,57 +1024,6 @@ is_user_online(JID, StateData) ->
     LJID = jlib:jid_tolower(JID),
     ?DICT:is_key(LJID, StateData#state.users).
 
-
-%%%
-%%% Handle IQ queries of vCard
-%%%
-is_user_online_iq(StanzaId, JID, StateData) when JID#jid.lresource /= "" ->
-    {is_user_online(JID, StateData), StanzaId, JID};
-is_user_online_iq(StanzaId, JID, StateData) when JID#jid.lresource == "" ->
-    try stanzaid_unpack(StanzaId) of
-	{OriginalId, Resource} ->
-	    JIDWithResource = jlib:jid_replace_resource(JID, Resource),
-	    {is_user_online(JIDWithResource, StateData),
-	     OriginalId, JIDWithResource}
-    catch
-	_:_ ->
-	    {is_user_online(JID, StateData), StanzaId, JID}
-    end.
-
-handle_iq_vcard(FromFull, ToJID, StanzaId, NewId, Packet) ->
-    ToBareJID = jlib:jid_remove_resource(ToJID),
-    IQ = jlib:iq_query_info(Packet),
-    handle_iq_vcard2(FromFull, ToJID, ToBareJID, StanzaId, NewId, IQ, Packet).
-handle_iq_vcard2(_FromFull, ToJID, ToBareJID, StanzaId, _NewId,
-		 #iq{type = get, xmlns = ?NS_VCARD}, Packet)
-  when ToBareJID /= ToJID ->
-    {ToBareJID, change_stanzaid(StanzaId, ToJID, Packet)};
-handle_iq_vcard2(_FromFull, ToJID, _ToBareJID, _StanzaId, NewId, _IQ, Packet) ->
-    {ToJID, change_stanzaid(NewId, Packet)}.
-
-stanzaid_pack(OriginalId, Resource) ->
-    "berd"++base64:encode_to_string("ejab\0" ++ OriginalId ++ "\0" ++ Resource).
-stanzaid_unpack("berd"++StanzaIdBase64) ->
-    StanzaId = base64:decode_to_string(StanzaIdBase64),
-    ["ejab", OriginalId, Resource] = string:tokens(StanzaId, "\0"),
-    {OriginalId, Resource}.
-
-change_stanzaid(NewId, Packet) ->
-    {xmlelement, Name, Attrs, Els} = jlib:remove_attr("id", Packet),
-    {xmlelement, Name, [{"id", NewId} | Attrs], Els}.
-change_stanzaid(PreviousId, ToJID, Packet) ->
-    NewId = stanzaid_pack(PreviousId, ToJID#jid.lresource),
-    change_stanzaid(NewId, Packet).
-%%%
-%%%
-
-role_to_list(Role) ->
-    case Role of
-	moderator ->   "moderator";
-	participant -> "participant";
-	visitor ->     "visitor";
-	none ->        "none"
-    end.
 
 %% Decide the fate of the message and its sender
 %% Returns: continue_delivery | forget_message | {expulse_sender, Reason}
