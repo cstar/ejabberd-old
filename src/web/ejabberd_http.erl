@@ -35,6 +35,9 @@
 	 receive_headers/1,
 	 url_encode/1]).
 
+%% Callbacks
+-export([init/2]).
+
 -include("ejabberd.hrl").
 -include("jlib.hrl").
 -include("ejabberd_http.hrl").
@@ -79,7 +82,10 @@
 start(SockData, Opts) ->
     supervisor:start_child(ejabberd_http_sup, [SockData, Opts]).
 
-start_link({SockMod, Socket}, Opts) ->
+start_link(SockData, Opts) ->
+    {ok, proc_lib:spawn_link(ejabberd_http, init, [SockData, Opts])}.
+
+init({SockMod, Socket}, Opts) ->
     TLSEnabled = lists:member(tls, Opts),
     TLSOpts = lists:filter(fun({certfile, _}) -> true;
 			      (_) -> false
@@ -129,11 +135,10 @@ start_link({SockMod, Socket}, Opts) ->
     ?DEBUG("S: ~p~n", [RequestHandlers]),
 
     ?INFO_MSG("started: ~p", [{SockMod1, Socket1}]),
-    {ok, proc_lib:spawn_link(ejabberd_http,
-			     receive_headers,
-			     [#state{sockmod = SockMod1,
-				     socket = Socket1,
-				     request_handlers = RequestHandlers}])}.
+    State = #state{sockmod = SockMod1,
+                   socket = Socket1,
+                   request_handlers = RequestHandlers},
+    receive_headers(State).
 
 
 become_controller(_Pid) ->

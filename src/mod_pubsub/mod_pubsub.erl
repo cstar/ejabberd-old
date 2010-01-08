@@ -632,7 +632,7 @@ disco_local_features(Acc, _From, To, [], _Lang) ->
     end,
     {result, Feats ++ lists:map(fun(Feature) ->
 	?NS_PUBSUB++"#"++Feature
-    end, features(Host, []))};
+    end, features(Host, <<>>))};
 disco_local_features(Acc, _From, _To, _Node, _Lang) ->
     Acc.
 
@@ -719,10 +719,16 @@ disco_sm_items(Acc, From, To, SNode, _Lang) ->
 
 presence_probe(#jid{luser = User, lserver = Server, lresource = Resource} = JID, JID, Pid) ->
     Proc = gen_mod:get_module_proc(Server, ?PROCNAME),
+    %%?DEBUG("presence probe self ~s@~s/~s  ~s@~s/~s",[User,Server,Resource,element(2,JID),element(3,JID),element(4,JID)]),
     gen_server:cast(Proc, {presence, JID, Pid}),
     gen_server:cast(Proc, {presence, User, Server, [Resource], JID});
+presence_probe(#jid{luser = User, lserver = Server}, #jid{luser = User, lserver = Server}, _Pid) ->
+    %% ignore presence_probe from other ressources for the current user
+    %% this way, we do not send duplicated last items if user already connected with other clients
+    ok;
 presence_probe(#jid{luser = User, lserver = Server, lresource = Resource}, #jid{lserver = Host} = JID, _Pid) ->
     Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
+    %%?DEBUG("presence probe peer ~s@~s/~s  ~s@~s/~s",[User,Server,Resource,element(2,JID),element(3,JID),element(4,JID)]),
     gen_server:cast(Proc, {presence, User, Server, [Resource], JID}).
 
 %% -------
@@ -1510,7 +1516,7 @@ send_authorization_request(#pubsub_node{owners = Owners, nodeid = {Host, Node}},
 		   {"label", translate:translate(Lang, "Allow this Jabber ID to subscribe to this pubsub node?")}],
 		  [{xmlelement, "value", [], [{xmlcdata, "false"}]}]}]}]},
     lists:foreach(fun(Owner) ->
-	ejabberd_router ! {route, service_jid(Host), jlib:make_jid(Owner), Stanza}
+	ejabberd_router:route(service_jid(Host), jlib:make_jid(Owner), Stanza)
     end, Owners).
 
 find_authorization_response(Packet) ->
@@ -1560,7 +1566,7 @@ send_authorization_approval(Host, JID, SNode, Subscription) ->
 	[{xmlelement, "subscription",
 	  [{"jid", jlib:jid_to_string(JID)}|nodeAttr(SNode)] ++ SubAttrs,
 	  []}]),
-    ejabberd_router ! {route, service_jid(Host), JID, Stanza}.
+    ejabberd_router:route(service_jid(Host), JID, Stanza).
 
 handle_authorization_response(Host, From, To, Packet, XFields) ->
     case {lists:keysearch("pubsub#node", 1, XFields),
@@ -2331,7 +2337,7 @@ send_items(Host, Node, NodeId, Type, LJID, last) ->
 	    Stanza = event_stanza_with_delay(
 		[{xmlelement, "items", nodeAttr(Node),
 		  itemsEls([LastItem])}], ModifNow, ModifLjid),
-	    ejabberd_router ! {route, service_jid(Host), jlib:make_jid(LJID), Stanza}
+	    ejabberd_router:route(service_jid(Host), jlib:make_jid(LJID), Stanza)
     end;
 send_items(Host, Node, NodeId, Type, LJID, Number) ->
     ToSend = case node_action(Host, Type, get_items, [NodeId, LJID]) of
@@ -2356,7 +2362,7 @@ send_items(Host, Node, NodeId, Type, LJID, Number) ->
 		[{xmlelement, "items", nodeAttr(Node),
 		  itemsEls(ToSend)}])
     end,
-    ejabberd_router ! {route, service_jid(Host), jlib:make_jid(LJID), Stanza}.
+    ejabberd_router:route(service_jid(Host), jlib:make_jid(LJID), Stanza).
 
 %% @spec (Host, JID, Plugins) -> {error, Reason} | {result, Response}
 %%	 Host = host()
@@ -2758,7 +2764,7 @@ set_subscriptions(Host, Node, From, EntitiesEls) ->
 				    [{"jid", jlib:jid_to_string(JID)}, 
 				    %{"subid", SubId},
 				     {"subscription", subscription_to_string(Sub)} | nodeAttr(Node)], []}]}]},
-		ejabberd_router ! {route, service_jid(Host), jlib:make_jid(JID), Stanza}
+		ejabberd_router:route(service_jid(Host), jlib:make_jid(JID), Stanza)
 	    end,
 	    Action = fun(#pubsub_node{owners = Owners, type = Type, id = NodeId}) ->
 			    case lists:member(Owner, Owners) of
@@ -3106,7 +3112,7 @@ broadcast_stanza(Host, Node, _NodeId, _Type, NodeOptions, SubsByDepth, NotifyTyp
 				  end,
 			  SHIMStanza = add_headers(Stanza, collection_shim(Node, Nodes)),
 			  lists:foreach(fun(To) ->
-						ejabberd_router ! {route, From, jlib:make_jid(To), SHIMStanza}
+						ejabberd_router:route(From, jlib:make_jid(To), SHIMStanza)
 					end, LJIDs)
 		  end, NodesByJID),
     %% Handles implicit presence subscriptions
@@ -3140,7 +3146,7 @@ broadcast_stanza(Host, Node, _NodeId, _Type, NodeOptions, SubsByDepth, NotifyTyp
 					end
 				    end, [], user_resources(U, S)),
 				    lists:foreach(fun(To) ->
-					ejabberd_router ! {route, Sender, jlib:make_jid(To), Stanza}
+					ejabberd_router:route(Sender, jlib:make_jid(To), Stanza)
 				    end, LJIDs)
 				end)
 			    end, Contacts);

@@ -315,7 +315,7 @@ To compile \ejabberd{} on a `Unix-like' operating system, you need:
 \item Erlang pgsql library. Optional. For PostgreSQL authentication or storage. See section \ref{compilepgsql}.
 \item PAM library. Optional. For Pluggable Authentication Modules (PAM). See section \ref{pam}.
 \item GNU Iconv 1.8 or higher, for the IRC Transport (mod\_irc). Optional. Not needed on systems with GNU Libc. See section \ref{modirc}.
-\item ImageMagick's Convert program, and Bash. Optional. For CAPTCHA challenges. See section \ref{captcha}.
+\item ImageMagick's Convert program. Optional. For CAPTCHA challenges. See section \ref{captcha}.
 \item exmpp 0.9.1 or higher. Optional. For import/export user data with \xepref{0227} XML files.
 \end{itemize}
 
@@ -1546,7 +1546,7 @@ Some \ejabberd{} modules can be configured to require a CAPTCHA challenge on cer
 If the client does not support CAPTCHA Forms (\xepref{0158}),
 a web link is provided so the user can fill the challenge in a web browser.
 
-An example Bash script is provided that generates the image
+An example script is provided that generates the image
 using ImageMagick's Convert program.
 
 The configurable options are:
@@ -2854,12 +2854,11 @@ Options:
     DirectoryIndex variable. When a web request hits a directory
     instead of a regular file, those directory indices are looked in
     order, and the first one found is returned.
-  %B \titem{content\_types} \ind{options!contenttypes}
-  %M \titem{\{content\_types, \{Extension, Type\} \}} \ind{options!contenttypes}
-  %B \titem{\{content\_types, [ Extension, Type, ... ]\}} \ind{options!contenttypes}
-  %B \titem{\{content\_types, [ {Extension, Type}, ... ]\}} \ind{options!contenttypes}
-  %M \titem{\{content\_types, [ \{Extension, Type\}, ... ]\}} \ind{options!contenttypes}
-    Specify a mapping of extensions to content types.
+  \titem{\{custom\_headers, [ \{Name, Value\}, ...]\}} \ind{options!customheaders}
+    Indicate custom HTTP headers to be included in all responses.
+    Default value is: \term{[]}
+  \titem{\{content\_types, [ \{Name, Type\}, ...]\}} \ind{options!contenttypes}
+    Specify mappings of extension to content type.
     There are several content types already defined,
     with this option you can add new definitions, modify or delete existing ones.
     To delete an existing definition, simply define it with a value: `undefined'.
@@ -2882,6 +2881,9 @@ To use this module you must enable it:
                          {docroot, "/var/www"}, 
                          {accesslog, "/var/log/ejabberd/access.log"},
                          {directory_indices, ["index.html", "main.htm"]},
+                         {custom_headers, [{"X-Powered-By", "Erlang/OTP"},
+                                           {"X-Fry", "It's a widely-believed fact!"}
+                                          ]},
                          {content_types, [{".ogg", "audio/ogg"},
                                           {".png", "image/png"},
                                           {".jpg", undefined}
@@ -3571,6 +3573,8 @@ and it requires \modcaps{}.
 Options:
 \begin{description}
 \hostitem{pubsub}
+  If you use \modpubsubodbc, please ensure the prefix contains only one dot,
+  for example `\jid{pubsub.}', or `\jid{publish.}',.
 \titem{\{access\_createnode, AccessName\}} \ind{options!access\_createnode}
   This option restricts which users are allowed to create pubsub nodes using
   ACL and ACCESS.
@@ -4915,7 +4919,7 @@ following steps:
 \item Copy \verb|~ejabberd/.erlang.cookie| file from \term{first} to
   \term{second}.
 
-  (alt) You can also add `\verb|-cookie content_of_.erlang.cookie|'
+  (alt) You can also add `\verb|-setcookie content_of_.erlang.cookie|'
   option to all `\shell{erl}' commands below.
 
 \item On \term{second} run the following command as the \ejabberd{} daemon user,
