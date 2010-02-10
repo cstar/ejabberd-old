@@ -78,11 +78,11 @@
 %% module database schema if it does not exists yet.</p>
 init(Host, ServerHost, Opts) ->
     Bucket = gen_mod:get_opt(s3_bucket, Opts, ServerHost),
-    s3:start(),
-    {ok, Buckets} = s3:list_buckets(),
+    erls3:start(),
+    {ok, Buckets} = erls3:list_buckets(),
     case lists:member(Bucket, Buckets) of 
         false ->
-            s3:create_bucket(Bucket),
+            erls3:create_bucket(Bucket),
             ?INFO_MSG("S3 bucket ~s created", [Bucket]);
         true -> ok
     end,
@@ -102,7 +102,7 @@ options() ->
 %%     Record = mod_pubsub:pubsub_node()
 set_node(#pubsub_node{nodeid = NodeId}=N)->
     Key = make_key(NodeId),
-    s3:write_term(get_bucket(NodeId), Key, N),
+    erls3:write_term(get_bucket(NodeId), Key, N),
     ok;
     
 set_node(_) ->
@@ -145,7 +145,7 @@ get_node(Host, Node, _From) ->
 %%     Node = mod_pubsub:pubsubNode()
 get_node(Host, Node) ->
     Key = make_key({Host, Node}),
-    case s3:read_object(get_bucket(Host), Key) of
+    case erls3:read_object(get_bucket(Host), Key) of
         {ok, {Conf, _H}}->
             R = binary_to_term(list_to_binary(Conf)),
             ?DEBUG("Got node : ~p", [R]),
@@ -163,7 +163,7 @@ get_nodes(Host, _From) ->
 %%     Host = mod_pubsub:host() | mod_pubsub:jid()
 get_nodes(Host) ->
     K=make_key({Host, []}),
-    Nodes =  s3:get_objects(get_bucket(Host), [{prefix, K}]),
+    Nodes =  erls3:get_objects(get_bucket(Host), [{prefix, K}]),
     lists:map(fun({_K, Bin, _H})-> binary_to_term(list_to_binary(Bin)) end, Nodes).
 
 %% @spec (Host, Node, From) -> [{Depth, Record}] | {error, Reason}
@@ -200,7 +200,7 @@ get_subnodes(Host, Node, _From) ->
         [$/|_R] -> Key;
         _ -> Key ++ "/"
     end,
-    Nodes = s3:get_objects(get_bucket(Host), [{prefix, K}, {delimiter, "/"}]),
+    Nodes = erls3:get_objects(get_bucket(Host), [{prefix, K}, {delimiter, "/"}]),
     lists:map(fun({_K, Bin, _H})-> binary_to_term(list_to_binary(Bin)) end, Nodes).
 
 
@@ -212,7 +212,7 @@ get_subnodes_tree(Host, Node,_From) ->
 
 get_subnodes_tree(Host, Node)->
     Key=make_key({Host, Node}),
-    {ok, Items} =  s3:list_objects(get_bucket(Host), [{prefix, Key}]),
+    {ok, Items} =  erls3:list_objects(get_bucket(Host), [{prefix, Key}]),
     lists:foldl(fun({object_info,{"Key", K }, _, _,_}, Acc)-> 
             case parse_key(K) of
                 {_H, Node}->Acc;
@@ -275,7 +275,7 @@ delete_node(Key, Node) ->
     Removed = get_subnodes_tree(Key, Node),
     lists:foreach(fun(N) ->
             K = make_key({Key, N}),
-		    s3:delete_object(get_bucket(Key), K)
+		    erls3:delete_object(get_bucket(Key), K)
 		  end, Removed),
     Removed.
 

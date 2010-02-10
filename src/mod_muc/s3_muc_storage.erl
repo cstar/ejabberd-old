@@ -26,17 +26,17 @@
 init(_Host, ServerHost, Opts)->
     ?DEBUG("init S3", []),
     Bucket = gen_mod:get_opt(s3_bucket, Opts, ServerHost),
-    s3:start(),
-    {ok, Buckets} = s3:list_buckets(),
+    erls3:start(),
+    {ok, Buckets} = erls3:list_buckets(),
     case lists:member(Bucket, Buckets) of 
         false ->
-            s3:create_bucket(Bucket),
+            erls3:create_bucket(Bucket),
             ?INFO_MSG("S3 bucket ~s created", [Bucket]);
         true -> ok
     end,
     ets:new(s3_muc, [set, named_table, public]),
     ets:insert(s3_muc, {bucket, Bucket}),
-    s3:start(),
+    erls3:start(),
     ok.
     
 % @spec (Host,ServerHost, Name, Type, Opts)-> ok | {error, Reason}
@@ -46,7 +46,7 @@ store_room(Host,ServerHost, Name, Type, Opts)->
     Bucket = get_bucket(),
     Key = build_key(Host, Name),
     Data = {Type, Opts},
-    Res = s3:write_term(Bucket, Key, Data),
+    Res = erls3:write_term(Bucket, Key, Data),
     Res.
     
 
@@ -54,7 +54,7 @@ store_room(Host,ServerHost, Name, Type, Opts)->
 % @doc restores room from storage
 restore_room(Host,ServerHost, Name)->
     ?DEBUG("restore_room S3", []),
-    case s3:read_object(get_bucket(), build_key(Host, Name)) of
+    case erls3:read_object(get_bucket(), build_key(Host, Name)) of
      {ok, {Conf, _H}}->
       binary_to_term(list_to_binary(Conf));
      _ -> 
@@ -64,14 +64,14 @@ restore_room(Host,ServerHost, Name)->
 % @doc removes room from storage
 forget_room(Host, ServerHost, Name) ->
     ?DEBUG("forget_room muc_s3", []),
-     s3:delete_object(get_bucket(), build_key(Host, Name)).
+     erls3:delete_object(get_bucket(), build_key(Host, Name)).
 
 % @spec (Host,ServerHost)-> [{Name, Host}]
 % @doc Used for disco
 % @deprecated
     
 fetch_room_names(Host, ServerHost)->
-    case catch s3:list_objects(get_bucket(),[{prefix,build_key(Host,"")}] ) of
+    case catch erls3:list_objects(get_bucket(),[{prefix,build_key(Host,"")}] ) of
     {'EXIT', Reason} ->
 	    ?ERROR_MSG("~p", [Reason]),
 	    [];

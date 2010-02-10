@@ -99,11 +99,11 @@ init(Host, ServerHost, Opts) ->
     pubsub_subscription:init(),
     erlsdb:start(),
     Bucket = gen_mod:get_opt(s3_tree_bucket, Opts, ServerHost),
-    s3:start(),
-    {ok, Buckets} = s3:list_buckets(),
+    erls3:start(),
+    {ok, Buckets} = erls3:list_buckets(),
     case lists:member(Bucket, Buckets) of 
         false ->
-            s3:create_bucket(Bucket),
+            erls3:create_bucket(Bucket),
             ?INFO_MSG("S3 bucket ~s created", [Bucket]);
         true -> ok
     end,
@@ -926,7 +926,7 @@ del_state(NodeId, JID) ->
 %% ```get_items(NodeId, From) ->
 %%	   node_default:get_items(NodeId, From).'''</p>
 get_items({Host, Node}, _From) ->
-    Items = s3:get_objects(get_bucket(Host), [{prefix,build_key(Host, Node,"")}] ),
+    Items = erls3:get_objects(get_bucket(Host), [{prefix,build_key(Host, Node,"")}] ),
     Items2 = lists:map(fun({_K, Conf, _H})->
         binary_to_term(list_to_binary(Conf))
     end, Items),
@@ -983,7 +983,7 @@ build_key(#pubsub_item{itemid={ItemId, {Host, Node}}})->
 %%	 Item = mod_pubsub:pubsubItems()
 %% @doc <p>Returns an item (one item list), given its reference.</p>
 get_item({Host, Node}, ItemId) ->
-    case s3:read_object(get_bucket(Host), build_key(Host, Node,ItemId)) of
+    case erls3:read_object(get_bucket(Host), build_key(Host, Node,ItemId)) of
         {ok, {Conf, _H}}->
             {result, binary_to_term(list_to_binary(Conf))};
         _ -> 
@@ -1030,7 +1030,7 @@ get_item(NodeId, ItemId, JID, AccessModel, PresenceSubscription, RosterGroup, _S
 %% @doc <p>Write an item into database.</p>
 set_item(#pubsub_item{itemid={_,NodeId}}=Item) when is_record(Item, pubsub_item) ->
     spawn(fun()->
-        s3:write_object(get_bucket(NodeId), build_key(Item), term_to_binary(Item), "application/erlang")
+        erls3:write_object(get_bucket(NodeId), build_key(Item), term_to_binary(Item), "application/erlang")
     end),
     ok;
 set_item(_) ->
@@ -1042,7 +1042,7 @@ set_item(_) ->
 %% @doc <p>Delete an item from database.</p>
 del_item({Host, Node}=NodeId, ItemId) ->
     spawn(fun()->
-        s3:delete_object(get_bucket(NodeId), build_key(Host, Node, ItemId))
+        erls3:delete_object(get_bucket(NodeId), build_key(Host, Node, ItemId))
     end),
     ok.
 del_items(NodeId, ItemIds) ->
