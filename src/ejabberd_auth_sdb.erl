@@ -81,7 +81,7 @@ check_password(User, Server, Password, _StreamID, _Digest) ->
 is_user_exists(User, Server) ->
     LUser = jlib:nameprep(User),
     LServer = jlib:nodeprep(Server),
-    case catch erlsdb:get_attributes(?DOMAIN, LUser ++"@" ++LServer) of
+    case catch erlsdb:get_attributes(get_domain(Server), LUser ++"@" ++LServer) of
     {ok, []} -> false;
 	{ok, _U} ->
 	    true;
