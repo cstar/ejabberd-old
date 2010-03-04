@@ -42,7 +42,14 @@
 	 get_jid_info/4,
 	 item_to_xml/1,
 	 webadmin_page/3,
-	 webadmin_user/4]).
+	 webadmin_user/4,
+	 sdb_write/1,
+	 user_roster_subscribe_jid/3,
+	 user_roster_unsubscribe_jid/3,
+	 user_roster_unsubscribed_jid/3,
+	 user_roster_subscribed_jid/3,
+	 sdb_remove/1
+	 ]).
 
 -include("ejabberd.hrl").
 -include("jlib.hrl").
@@ -981,7 +988,25 @@ user_roster_subscribe_jid(User, Server, JID) ->
     UJID = jlib:make_jid(User, Server, ""),
     ejabberd_router:route(
       UJID, JID, {xmlelement, "presence", [{"type", "subscribe"}], []}).
+      
+user_roster_unsubscribe_jid(User, Server, JID) ->
+    out_subscription(User, Server, JID, unsubscribe),
+    UJID = jlib:make_jid(User, Server, ""),
+    ejabberd_router:route(
+      UJID, JID, {xmlelement, "presence", [{"type", "unsubscribe"}], []}).   
+         
+user_roster_unsubscribed_jid(User, Server, JID) ->
+    in_subscription([],User, Server, JID, unsubscribed, []),
+    UJID = jlib:make_jid(User, Server, ""),
+    ejabberd_router:route(
+      UJID, JID, {xmlelement, "presence", [{"type", "unsubscribed"}], []}).  
 
+user_roster_subscribed_jid(User, Server, JID) ->
+    in_subscription([], User, Server, JID, subscribed, []),
+    UJID = jlib:make_jid(User, Server, ""),
+    ejabberd_router:route(
+      UJID, JID, {xmlelement, "presence", [{"type", "subscribed"}], []}). 
+   
 user_roster_item_parse_query(User, Server, Items, Query) ->
     lists:foreach(
       fun(R) ->
